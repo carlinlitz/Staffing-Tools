@@ -3,15 +3,6 @@ import random
 from ortools.sat.python import cp_model
 import plotly.graph_objects as go
 
-colors = {
-        "high":          "#c9a84c",
-        "moderate":      "#7eb8c9",
-        "unavailable":   "#4c956c",
-        "not_available": "#1e1e2e",
-        "resigned":      "#2d2d5a",
-        "free":          "#2a2a3a",
-    }
-
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Staffing Scenario Planner", layout="wide")
 st.title("Staffing Scenario Planner")
@@ -174,7 +165,7 @@ def solve_staffing(all_assignments, staff, max_assignments_per_person=2, min_gap
 def get_scenario(scenario_name, seed, n_senior, n_junior,
                  senior_resignations, junior_resignations,
                  new_hires, new_hire_delay,
-                 rotation_difficulty, special_difficulty,
+                 rotation_6wk_difficulty, rotation_8wk_difficulty, special_difficulty,
                  unavailable_weeks):
     all_assignments = []
 
@@ -182,7 +173,7 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
         # 10 six-week rotations, 2 special assignments
         start = 1
         for i in range(10):
-            all_assignments.append({"name": f"Rotation {i+1}", "start": start, "duration": 6, "difficulty": rotation_difficulty})
+            all_assignments.append({"name": f"Rotation {i+1}", "start": start, "duration": 6, "difficulty": rotation_6wk_difficulty})
             start += 5
         all_assignments += [
             {"name": "Special A", "start": 8, "duration": 4, "difficulty": special_difficulty},
@@ -193,7 +184,7 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
         # 10 six-week rotations, 4 special assignments
         start = 1
         for i in range(10):
-            all_assignments.append({"name": f"Rotation {i+1}", "start": start, "duration": 6, "difficulty": rotation_difficulty})
+            all_assignments.append({"name": f"Rotation {i+1}", "start": start, "duration": 6, "difficulty": rotation_6wk_difficulty})
             start += 5
         all_assignments += [
             {"name": "Special A", "start": 8, "duration": 4, "difficulty": special_difficulty},
@@ -206,11 +197,11 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
         # 10 six-week + 7 eight-week rotations, 2 special assignments
         start = 1
         for i in range(10):
-            all_assignments.append({"name": f"Rotation_6wk_{i+1}", "start": start, "duration": 6, "difficulty": rotation_difficulty})
+            all_assignments.append({"name": f"Rotation_6wk_{i+1}", "start": start, "duration": 6, "difficulty": rotation_6wk_difficulty})
             start += 5
         start = 2
         for i in range(7):
-            all_assignments.append({"name": f"Rotation_8wk_{i+1}", "start": start, "duration": 8, "difficulty": "moderate"})
+            all_assignments.append({"name": f"Rotation_8wk_{i+1}", "start": start, "duration": 8, "difficulty": rotation_8wk_difficulty})
             start += 7
         all_assignments += [
             {"name": "Special A", "start": 8, "duration": 4, "difficulty": special_difficulty},
@@ -221,8 +212,8 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
         # 14 eight-week rotations (2 concurrent), 2 special assignments
         start = 1
         for i in range(7):
-            all_assignments.append({"name": f"Rotation {i+1}", "start": start, "duration": 8, "difficulty": rotation_difficulty})
-            all_assignments.append({"name": f"Rotation {i+8}", "start": start + 1, "duration": 8, "difficulty": "moderate"})
+            all_assignments.append({"name": f"Rotation {i+1}", "start": start, "duration": 8, "difficulty": rotation_8wk_difficulty})
+            all_assignments.append({"name": f"Rotation {i+8}", "start": start + 1, "duration": 8, "difficulty": rotation_8wk_difficulty})
             start += 7
         all_assignments += [
             {"name": "Special A", "start": 8, "duration": 4, "difficulty": special_difficulty},
@@ -233,8 +224,8 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
         # 20 six-week rotations (2 concurrent), 2 special assignments
         start = 1
         for i in range(10):
-            all_assignments.append({"name": f"Rotation {i+1}", "start": start, "duration": 6, "difficulty": rotation_difficulty})
-            all_assignments.append({"name": f"Rotation {i+11}", "start": start, "duration": 6, "difficulty": rotation_difficulty})
+            all_assignments.append({"name": f"Rotation {i+1}", "start": start, "duration": 6, "difficulty": rotation_6wk_difficulty})
+            all_assignments.append({"name": f"Rotation {i+11}", "start": start, "duration": 6, "difficulty": rotation_6wk_difficulty})
             start += 5
         all_assignments += [
             {"name": "Special A", "start": 8, "duration": 4, "difficulty": special_difficulty},
@@ -256,7 +247,14 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
 
 def build_gantt(results, all_assignments, staff):
     assignment_map = {a["name"]: a for a in all_assignments}
-   
+    colors = {
+        "high":          "#c9a84c",
+        "moderate":      "#7eb8c9",
+        "unavailable":   "#5a2d2d",
+        "not_available": "#1e1e2e",
+        "resigned":      "#2d2d5a",
+        "free":          "#2a2a3a",
+    }
     result_names = {p["name"] for p in results}
     people = [p for p in staff if p["name"] in result_names]
 
@@ -348,8 +346,22 @@ unavailable_weeks   = st.sidebar.slider("Unavailable Weeks per Person", 0, 8, 3)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📋 Assignment Settings")
-rotation_difficulty = st.sidebar.selectbox("Rotation Difficulty", ["high", "moderate"], index=0)
-special_difficulty  = st.sidebar.selectbox("Special Assignment Difficulty", ["high", "moderate"], index=0)
+
+# Show difficulty controls based on which rotation types exist in the selected scenario
+has_6wk = scenario_name in ["Scenario 1", "Scenario 2", "Scenario 3", "Scenario 5"]
+has_8wk = scenario_name in ["Scenario 3", "Scenario 4"]
+
+if has_6wk:
+    rotation_6wk_difficulty = st.sidebar.selectbox("6-week Rotation Difficulty", ["high", "moderate"], index=0)
+else:
+    rotation_6wk_difficulty = "high"
+
+if has_8wk:
+    rotation_8wk_difficulty = st.sidebar.selectbox("8-week Rotation Difficulty", ["high", "moderate"], index=0)
+else:
+    rotation_8wk_difficulty = "moderate"
+
+special_difficulty = st.sidebar.selectbox("Special Assignment Difficulty", ["high", "moderate"], index=0)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Model Settings")
@@ -365,7 +377,8 @@ all_assignments, staff = get_scenario(
     senior_resignations=int(senior_resignations),
     junior_resignations=int(junior_resignations),
     new_hires=int(new_hires), new_hire_delay=new_hire_delay,
-    rotation_difficulty=rotation_difficulty,
+    rotation_6wk_difficulty=rotation_6wk_difficulty,
+    rotation_8wk_difficulty=rotation_8wk_difficulty,
     special_difficulty=special_difficulty,
     unavailable_weeks=unavailable_weeks,
 )
@@ -392,11 +405,11 @@ else:
     st.subheader("Schedule")
 
     lcol1, lcol2, lcol3, lcol4, lcol5 = st.columns(5)
-    lcol1.markdown(f'<span style="color:{colors["high"]}">■</span> High difficulty', unsafe_allow_html=True)
-    lcol2.markdown(f'<span style="color:{colors["moderate"]}">■</span> Moderate difficulty', unsafe_allow_html=True)
-    lcol3.markdown(f'<span style="color:{colors["unavailable"]}">■</span> Unavailable / Leave', unsafe_allow_html=True)
-    lcol4.markdown(f'<span style="color:{colors["not_available"]}">■</span> Not yet hired', unsafe_allow_html=True)
-    lcol5.markdown(f'<span style="color:{colors["resigned"]}">■</span> Resigned', unsafe_allow_html=True)
+    lcol1.markdown("🟨 High difficulty")
+    lcol2.markdown("🟦 Moderate difficulty")
+    lcol3.markdown("🟥 Unavailable / Leave")
+    lcol4.markdown("⬛ Not yet hired")
+    lcol5.markdown("🟪 Resigned")
 
     fig = build_gantt(results, all_assignments, staff)
     st.plotly_chart(fig, use_container_width=True)

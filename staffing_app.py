@@ -367,6 +367,11 @@ if scenario_name == "Scenario 4":
 else:
     concurrent_8wk_difficulty = rotation_8wk_difficulty
 
+if scenario_name == "Scenario 5":
+    concurrent_6wk_difficulty = st.sidebar.selectbox("Concurrent 6-week Rotation Difficulty", ["high", "moderate"], index=1)
+else:
+    concurrent_6wk_difficulty = rotation_6wk_difficulty
+
 special_difficulty = st.sidebar.selectbox("Special Assignment Difficulty", ["high", "moderate"], index=0)
 
 st.sidebar.markdown("---")

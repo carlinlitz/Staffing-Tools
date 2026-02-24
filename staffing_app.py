@@ -12,6 +12,7 @@ st.markdown("---")
 
 def create_staff(n_senior, n_junior,
                  senior_resignations=0, junior_resignations=0,
+                 new_hires=0, new_hire_delay=39, new_hire_seniority="junior",
                  unavailable_weeks=3, seed=None):
     if seed is not None:
         random.seed(seed)
@@ -164,9 +165,9 @@ def solve_staffing(all_assignments, staff, max_assignments_per_person=2, min_gap
 def get_scenario(scenario_name, seed, n_senior, n_junior,
                  senior_resignations, junior_resignations,
                  new_hires, new_hire_delay,
-                 rotation_6wk_difficulty, rotation_8wk_difficulty,
-                 concurrent_8wk_difficulty, concurrent_6wk_difficulty, special_difficulty,
-                 unavailable_weeks):
+                 rotation_6wk_difficulty, concurrent_6wk_difficulty,
+                 rotation_8wk_difficulty, concurrent_8wk_difficulty,
+                 special_difficulty, unavailable_weeks):
     all_assignments = []
 
     if scenario_name == "Scenario 1":
@@ -356,6 +357,11 @@ if has_6wk:
 else:
     rotation_6wk_difficulty = "high"
 
+if scenario_name == "Scenario 5":
+    concurrent_6wk_difficulty = st.sidebar.selectbox("Concurrent 6-week Rotation Difficulty", ["high", "moderate"], index=1)
+else:
+    concurrent_6wk_difficulty = rotation_6wk_difficulty
+
 if has_8wk:
     rotation_8wk_difficulty = st.sidebar.selectbox("8-week Rotation Difficulty", ["high", "moderate"], index=0)
 else:
@@ -365,11 +371,6 @@ if scenario_name == "Scenario 4":
     concurrent_8wk_difficulty = st.sidebar.selectbox("Concurrent 8-week Rotation Difficulty", ["high", "moderate"], index=1)
 else:
     concurrent_8wk_difficulty = rotation_8wk_difficulty
-
-if scenario_name == "Scenario 5":
-    concurrent_6wk_difficulty = st.sidebar.selectbox("Concurrent 6-week Rotation Difficulty", ["high", "moderate"], index=1)
-else:
-    concurrent_6wk_difficulty = rotation_6wk_difficulty
 
 special_difficulty = st.sidebar.selectbox("Special Assignment Difficulty", ["high", "moderate"], index=0)
 

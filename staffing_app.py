@@ -12,7 +12,6 @@ st.markdown("---")
 
 def create_staff(n_senior, n_junior,
                  senior_resignations=0, junior_resignations=0,
-                 new_hires=0, new_hire_delay=39, new_hire_seniority="junior",
                  unavailable_weeks=3, seed=None):
     if seed is not None:
         random.seed(seed)
@@ -166,7 +165,7 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
                  senior_resignations, junior_resignations,
                  new_hires, new_hire_delay,
                  rotation_6wk_difficulty, rotation_8wk_difficulty,
-                 concurrent_8wk_difficulty, special_difficulty,
+                 concurrent_8wk_difficulty, concurrent_6wk_difficulty, special_difficulty,
                  unavailable_weeks):
     all_assignments = []
 
@@ -226,7 +225,7 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
         start = 1
         for i in range(10):
             all_assignments.append({"name": f"Rotation {i+1}", "start": start, "duration": 6, "difficulty": rotation_6wk_difficulty})
-            all_assignments.append({"name": f"Rotation {i+11}", "start": start, "duration": 6, "difficulty": rotation_6wk_difficulty})
+            all_assignments.append({"name": f"Rotation {i+11}", "start": start, "duration": 6, "difficulty": concurrent_6wk_difficulty})
             start += 5
         all_assignments += [
             {"name": "Special A", "start": 8, "duration": 4, "difficulty": special_difficulty},

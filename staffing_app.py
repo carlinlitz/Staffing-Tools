@@ -388,6 +388,7 @@ all_assignments, staff = get_scenario(
     junior_resignations=int(junior_resignations),
     new_hires=int(new_hires), new_hire_delay=new_hire_delay,
     rotation_6wk_difficulty=rotation_6wk_difficulty,
+    concurrent_6wk_difficulty=concurrent_6wk_difficulty,
     rotation_8wk_difficulty=rotation_8wk_difficulty,
     concurrent_8wk_difficulty=concurrent_8wk_difficulty,
     special_difficulty=special_difficulty,

@@ -165,7 +165,8 @@ def solve_staffing(all_assignments, staff, max_assignments_per_person=2, min_gap
 def get_scenario(scenario_name, seed, n_senior, n_junior,
                  senior_resignations, junior_resignations,
                  new_hires, new_hire_delay,
-                 rotation_6wk_difficulty, rotation_8wk_difficulty, special_difficulty,
+                 rotation_6wk_difficulty, rotation_8wk_difficulty,
+                 concurrent_8wk_difficulty, special_difficulty,
                  unavailable_weeks):
     all_assignments = []
 
@@ -213,7 +214,7 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
         start = 1
         for i in range(7):
             all_assignments.append({"name": f"Rotation {i+1}", "start": start, "duration": 8, "difficulty": rotation_8wk_difficulty})
-            all_assignments.append({"name": f"Rotation {i+8}", "start": start + 1, "duration": 8, "difficulty": rotation_8wk_difficulty})
+            all_assignments.append({"name": f"Rotation {i+8}", "start": start + 1, "duration": 8, "difficulty": concurrent_8wk_difficulty})
             start += 7
         all_assignments += [
             {"name": "Special A", "start": 8, "duration": 4, "difficulty": special_difficulty},
@@ -361,6 +362,11 @@ if has_8wk:
 else:
     rotation_8wk_difficulty = "moderate"
 
+if scenario_name == "Scenario 4":
+    concurrent_8wk_difficulty = st.sidebar.selectbox("Concurrent 8-week Rotation Difficulty", ["high", "moderate"], index=1)
+else:
+    concurrent_8wk_difficulty = rotation_8wk_difficulty
+
 special_difficulty = st.sidebar.selectbox("Special Assignment Difficulty", ["high", "moderate"], index=0)
 
 st.sidebar.markdown("---")
@@ -379,6 +385,7 @@ all_assignments, staff = get_scenario(
     new_hires=int(new_hires), new_hire_delay=new_hire_delay,
     rotation_6wk_difficulty=rotation_6wk_difficulty,
     rotation_8wk_difficulty=rotation_8wk_difficulty,
+    concurrent_8wk_difficulty=concurrent_8wk_difficulty,
     special_difficulty=special_difficulty,
     unavailable_weeks=unavailable_weeks,
 )

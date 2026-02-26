@@ -142,7 +142,7 @@ def solve_staffing(all_assignments, staff, max_assignments_per_person=2, min_gap
                 if not ("resign_week" in staff[p] and staff[p]["resign_week"] <= week)
             ]
             seniors_available = len(active_senior_indices)
-            max_away = max(0, seniors_available - dc_floor)
+            max_away = max(0, seniors_available - max(0, dc_floor - 2))  # hard limit is 2 below floor
             active_assignments = [
                 a for a in range(num_assignments)
                 if all_assignments[a]["start"] <= week < all_assignments[a]["start"] + all_assignments[a]["duration"]
@@ -516,8 +516,10 @@ else:
                 delta=f"{min_dc_headcount - int(dc_floor)} above floor" if dc_floor > 0 else None,
                 delta_color="normal")
 
-    if dc_floor > 0 and min_dc_headcount < dc_floor:
-        st.error(f"🚨 DC floor breached — minimum DC headcount ({min_dc_headcount}) fell below required floor ({int(dc_floor)}). Increase staff or reduce assignments.")
+    if dc_floor > 0 and min_dc_headcount < dc_floor - 2:
+        st.error(f"🚨 Critical DC breach — minimum DC headcount ({min_dc_headcount}) fell more than 2 below the floor ({int(dc_floor)}). This scenario is infeasible under current constraints.")
+    elif dc_floor > 0 and min_dc_headcount < dc_floor:
+        st.warning(f"⚠️ DC floor breached — this scenario is only feasible if we accept a minimum DC headcount of {min_dc_headcount} (floor: {int(dc_floor)}, breach of {int(dc_floor) - min_dc_headcount}). Consider increasing staff or reducing assignments.")
     elif dc_floor > 0:
         st.success(f"✅ DC floor maintained — minimum DC headcount was {min_dc_headcount} (floor: {int(dc_floor)})")
 

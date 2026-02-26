@@ -72,7 +72,7 @@ def create_staff(n_senior, n_junior,
     return staff
 
 
-def solve_staffing(all_assignments, staff, max_assignments_per_person=2, min_gap=12, year_weeks=52):
+def solve_staffing(all_assignments, staff, max_assignments_per_person=2, min_gap=12, year_weeks=52, dc_floor=0):
     model = cp_model.CpModel()
     num_people = len(staff)
     num_assignments = len(all_assignments)
@@ -131,6 +131,21 @@ def solve_staffing(all_assignments, staff, max_assignments_per_person=2, min_gap
         # Annual capacity
         total_weeks = sum(x[(p, a)] * all_assignments[a]["duration"] for a in range(num_assignments))
         model.Add(total_weeks <= year_weeks)
+
+    # DC floor constraint — for each week, seniors on assignment cannot exceed (total_seniors - dc_floor)
+    if dc_floor > 0:
+        senior_indices = [p for p in range(num_people) if staff[p]["seniority"] == "senior"]
+        total_seniors = len(senior_indices)
+        max_away = max(0, total_seniors - dc_floor)
+        for week in range(1, year_weeks + 1):
+            # Find assignments active during this week
+            active_assignments = [
+                a for a in range(num_assignments)
+                if all_assignments[a]["start"] <= week < all_assignments[a]["start"] + all_assignments[a]["duration"]
+            ]
+            if active_assignments:
+                seniors_away = sum(x[(p, a)] for p in senior_indices for a in active_assignments)
+                model.Add(seniors_away <= max_away)
 
     used = []
     for p in range(num_people):
@@ -246,7 +261,7 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
 
 # ── Gantt chart ───────────────────────────────────────────────────────────────
 
-def build_gantt(results, all_assignments, staff):
+def build_gantt(results, all_assignments, staff, dc_floor=0):
     assignment_map = {a["name"]: a for a in all_assignments}
     colors = {
         "high":          "#c9a84c",
@@ -304,6 +319,45 @@ def build_gantt(results, all_assignments, staff):
         fig.add_vline(x=ms - 1, line_width=1, line_color="#3a3a4a")
         fig.add_annotation(x=ms - 0.5, y=1.02, text=m, showarrow=False,
                            font=dict(size=9, color="#888"), yref="paper", xref="x")
+
+    # DC floor shaded band — highlight weeks where seniors in DC hit the floor
+    if dc_floor > 0:
+        assignment_map_gantt = {a["name"]: a for a in all_assignments}
+        senior_results = [p for p in results if p["seniority"] == "senior"]
+        seniors_used = len(senior_results)
+        at_floor_weeks = []
+        for week in range(1, 53):
+            on_assignment = sum(
+                1 for p in senior_results
+                if any(
+                    assignment_map_gantt[aname]["start"] <= week < assignment_map_gantt[aname]["start"] + assignment_map_gantt[aname]["duration"]
+                    for aname in p["assignments"] if aname in assignment_map_gantt
+                )
+            )
+            dc_headcount = seniors_used - on_assignment
+            if dc_headcount <= dc_floor:
+                at_floor_weeks.append(week)
+
+        # Add subtle shaded rectangles for at-floor weeks
+        for week in at_floor_weeks:
+            fig.add_shape(
+                type="rect",
+                x0=week - 1, x1=week,
+                y0=-0.5, y1=-0.05,
+                yref="paper",
+                fillcolor="rgba(232, 115, 74, 0.4)",
+                line_width=0,
+            )
+
+        if at_floor_weeks:
+            # Add a single legend entry for the band
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode="markers",
+                marker=dict(color="rgba(232,115,74,0.6)", symbol="square", size=10),
+                name=f"DC at/below floor ({int(dc_floor)})",
+                showlegend=True,
+            ))
 
     fig.update_layout(
         barmode="stack",
@@ -380,6 +434,11 @@ max_assignments = st.sidebar.slider("Max Assignments per Person", 1, 4, 2)
 min_gap         = st.sidebar.slider("Minimum Gap Between Assignments (weeks)", 4, 20, 12)
 seed            = st.sidebar.slider("Randomization Seed", 1, 100, 1)
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("🏛️ DC Operations")
+dc_floor        = st.sidebar.number_input("Minimum Seniors in DC at All Times", 0, 20, 0,
+                    help="Seniors on assignment cannot drop DC headcount below this number")
+
 # ── Main content ──────────────────────────────────────────────────────────────
 
 all_assignments, staff = get_scenario(
@@ -396,10 +455,16 @@ all_assignments, staff = get_scenario(
     unavailable_weeks=unavailable_weeks,
 )
 
+# Pre-check: warn if DC floor is impossible to satisfy
+total_seniors = int(n_senior)
+if dc_floor > 0 and dc_floor >= total_seniors:
+    st.warning(f"⚠️ DC floor ({int(dc_floor)}) is equal to or greater than total seniors ({total_seniors}) — no one could ever go on assignment. Reduce the DC floor.")
+
 with st.spinner("Solving..."):
     results, status = solve_staffing(all_assignments, staff,
                                      max_assignments_per_person=max_assignments,
-                                     min_gap=min_gap)
+                                     min_gap=min_gap,
+                                     dc_floor=int(dc_floor))
 
 st.subheader(f"{scenario_name} — {descriptions[scenario_name]}")
 st.caption(f"Solver status: {status}")
@@ -407,12 +472,45 @@ st.caption(f"Solver status: {status}")
 if results is None:
     st.error("No feasible solution found. Try adjusting the controls in the sidebar.")
 else:
-    col1, col2, col3, col4, col5 = st.columns(5)
+    seniors_used = sum(1 for p in results if p["seniority"] == "senior")
+    min_dc = seniors_used - max(
+        sum(1 for p in results if p["seniority"] == "senior" and any(
+            all_a["start"] <= week < all_a["start"] + all_a["duration"]
+            for aname in p["assignments"]
+            for all_a in all_assignments if all_a["name"] == aname
+        ))
+        for week in range(1, 53)
+    ) if results else 0
+
+    # Calculate minimum DC seniors across all weeks
+    assignment_map = {a["name"]: a for a in all_assignments}
+    senior_results = [p for p in results if p["seniority"] == "senior"]
+    dc_by_week = []
+    for week in range(1, 53):
+        on_assignment = sum(
+            1 for p in senior_results
+            if any(
+                assignment_map[aname]["start"] <= week < assignment_map[aname]["start"] + assignment_map[aname]["duration"]
+                for aname in p["assignments"] if aname in assignment_map
+            )
+        )
+        dc_by_week.append(seniors_used - on_assignment)
+    min_dc_headcount = min(dc_by_week) if dc_by_week else seniors_used
+
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("Staff Required", len(results))
     col2.metric("Total Assignments", len(all_assignments))
-    col3.metric("Seniors Used", sum(1 for p in results if p["seniority"] == "senior"))
+    col3.metric("Seniors Used", seniors_used)
     col4.metric("Juniors Used", sum(1 for p in results if p["seniority"] == "junior"))
     col5.metric("New Hires Used", sum(1 for p in results if p["type"] == "new_hire"))
+    col6.metric("Min DC Headcount", min_dc_headcount,
+                delta=f"{min_dc_headcount - int(dc_floor)} above floor" if dc_floor > 0 else None,
+                delta_color="normal")
+
+    if dc_floor > 0 and min_dc_headcount < dc_floor:
+        st.error(f"🚨 DC floor breached — minimum DC headcount ({min_dc_headcount}) fell below required floor ({int(dc_floor)}). Increase staff or reduce assignments.")
+    elif dc_floor > 0:
+        st.success(f"✅ DC floor maintained — minimum DC headcount was {min_dc_headcount} (floor: {int(dc_floor)})")
 
     st.markdown("---")
     st.subheader("Schedule")
@@ -424,7 +522,7 @@ else:
     lcol4.markdown("⬛ Not yet hired")
     lcol5.markdown("🟪 Resigned")
 
-    fig = build_gantt(results, all_assignments, staff)
+    fig = build_gantt(results, all_assignments, staff, dc_floor=int(dc_floor))
     st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")

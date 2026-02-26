@@ -324,7 +324,7 @@ def build_gantt(results, all_assignments, staff, dc_floor=0):
     if dc_floor > 0:
         assignment_map_gantt = {a["name"]: a for a in all_assignments}
         senior_results = [p for p in results if p["seniority"] == "senior"]
-        seniors_used = len(senior_results)
+        total_seniors_gantt = sum(1 for p in staff if p["seniority"] == "senior")
         at_floor_weeks = []
         for week in range(1, 53):
             on_assignment = sum(
@@ -334,7 +334,7 @@ def build_gantt(results, all_assignments, staff, dc_floor=0):
                     for aname in p["assignments"] if aname in assignment_map_gantt
                 )
             )
-            dc_headcount = seniors_used - on_assignment
+            dc_headcount = total_seniors_gantt - on_assignment
             if dc_headcount <= dc_floor:
                 at_floor_weeks.append(week)
 
@@ -473,16 +473,9 @@ if results is None:
     st.error("No feasible solution found. Try adjusting the controls in the sidebar.")
 else:
     seniors_used = sum(1 for p in results if p["seniority"] == "senior")
-    min_dc = seniors_used - max(
-        sum(1 for p in results if p["seniority"] == "senior" and any(
-            all_a["start"] <= week < all_a["start"] + all_a["duration"]
-            for aname in p["assignments"]
-            for all_a in all_assignments if all_a["name"] == aname
-        ))
-        for week in range(1, 53)
-    ) if results else 0
+    total_seniors_on_team = int(n_senior)  # full team, not just solver minimum
 
-    # Calculate minimum DC seniors across all weeks
+    # Calculate minimum DC seniors across all weeks using total team size
     assignment_map = {a["name"]: a for a in all_assignments}
     senior_results = [p for p in results if p["seniority"] == "senior"]
     dc_by_week = []
@@ -494,8 +487,8 @@ else:
                 for aname in p["assignments"] if aname in assignment_map
             )
         )
-        dc_by_week.append(seniors_used - on_assignment)
-    min_dc_headcount = min(dc_by_week) if dc_by_week else seniors_used
+        dc_by_week.append(total_seniors_on_team - on_assignment)
+    min_dc_headcount = min(dc_by_week) if dc_by_week else total_seniors_on_team
 
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("Staff Required", len(results))

@@ -132,19 +132,23 @@ def solve_staffing(all_assignments, staff, max_assignments_per_person=2, min_gap
         total_weeks = sum(x[(p, a)] * all_assignments[a]["duration"] for a in range(num_assignments))
         model.Add(total_weeks <= year_weeks)
 
-    # DC floor constraint — for each week, seniors on assignment cannot exceed (total_seniors - dc_floor)
+    # DC floor constraint — for each week, account for resignations to get actual available seniors
     if dc_floor > 0:
         senior_indices = [p for p in range(num_people) if staff[p]["seniority"] == "senior"]
-        total_seniors = len(senior_indices)
-        max_away = max(0, total_seniors - dc_floor)
         for week in range(1, year_weeks + 1):
-            # Find assignments active during this week
+            # Seniors still active this week (not yet resigned)
+            active_senior_indices = [
+                p for p in senior_indices
+                if not ("resign_week" in staff[p] and staff[p]["resign_week"] <= week)
+            ]
+            seniors_available = len(active_senior_indices)
+            max_away = max(0, seniors_available - dc_floor)
             active_assignments = [
                 a for a in range(num_assignments)
                 if all_assignments[a]["start"] <= week < all_assignments[a]["start"] + all_assignments[a]["duration"]
             ]
             if active_assignments:
-                seniors_away = sum(x[(p, a)] for p in senior_indices for a in active_assignments)
+                seniors_away = sum(x[(p, a)] for p in active_senior_indices for a in active_assignments)
                 model.Add(seniors_away <= max_away)
 
     used = []
@@ -324,9 +328,14 @@ def build_gantt(results, all_assignments, staff, dc_floor=0):
     if dc_floor > 0:
         assignment_map_gantt = {a["name"]: a for a in all_assignments}
         senior_results = [p for p in results if p["seniority"] == "senior"]
-        total_seniors_gantt = sum(1 for p in staff if p["seniority"] == "senior")
+        all_seniors_gantt = [p for p in staff if p["seniority"] == "senior"]
         at_floor_weeks = []
         for week in range(1, 53):
+            # Account for resignations
+            active_seniors_this_week = sum(
+                1 for p in all_seniors_gantt
+                if not ("resign_week" in p and p["resign_week"] <= week)
+            )
             on_assignment = sum(
                 1 for p in senior_results
                 if any(
@@ -334,7 +343,7 @@ def build_gantt(results, all_assignments, staff, dc_floor=0):
                     for aname in p["assignments"] if aname in assignment_map_gantt
                 )
             )
-            dc_headcount = total_seniors_gantt - on_assignment
+            dc_headcount = active_seniors_this_week - on_assignment
             if dc_headcount <= dc_floor:
                 at_floor_weeks.append(week)
 
@@ -475,11 +484,18 @@ else:
     seniors_used = sum(1 for p in results if p["seniority"] == "senior")
     total_seniors_on_team = int(n_senior)  # full team, not just solver minimum
 
-    # Calculate minimum DC seniors across all weeks using total team size
+    # Calculate minimum DC seniors across all weeks accounting for resignations
     assignment_map = {a["name"]: a for a in all_assignments}
+    all_seniors = [p for p in staff if p["seniority"] == "senior"]
     senior_results = [p for p in results if p["seniority"] == "senior"]
     dc_by_week = []
     for week in range(1, 53):
+        # Seniors still on team this week (not yet resigned)
+        active_seniors_this_week = sum(
+            1 for p in all_seniors
+            if not ("resign_week" in p and p["resign_week"] <= week)
+        )
+        # Seniors on international assignment this week
         on_assignment = sum(
             1 for p in senior_results
             if any(
@@ -487,7 +503,7 @@ else:
                 for aname in p["assignments"] if aname in assignment_map
             )
         )
-        dc_by_week.append(total_seniors_on_team - on_assignment)
+        dc_by_week.append(active_seniors_this_week - on_assignment)
     min_dc_headcount = min(dc_by_week) if dc_by_week else total_seniors_on_team
 
     col1, col2, col3, col4, col5, col6 = st.columns(6)

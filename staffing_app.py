@@ -265,6 +265,15 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
 
 # ── Gantt chart ───────────────────────────────────────────────────────────────
 
+colors = {
+    "high":          "#c9a84c",
+    "moderate":      "#7eb8c9",
+    "unavailable":   "#5a2d2d",
+    "not_available": "#1e1e2e",
+    "resigned":      "#2d2d5a",
+    "free":          "#2a2a3a",
+}
+
 def build_gantt(results, all_assignments, people, staff, dc_floor=0, show_dc_band=False):
     """
     results: solver output (used for assignment lookup)
@@ -272,14 +281,6 @@ def build_gantt(results, all_assignments, people, staff, dc_floor=0, show_dc_ban
     staff: full staff list (used for DC floor calc)
     """
     assignment_map = {a["name"]: a for a in all_assignments}
-    colors = {
-        "high":          "#c9a84c",
-        "moderate":      "#7eb8c9",
-        "unavailable":   "#5a2d2d",
-        "not_available": "#1e1e2e",
-        "resigned":      "#2d2d5a",
-        "free":          "#2a2a3a",
-    }
     result_names = {p["name"] for p in results}
 
     fig = go.Figure()

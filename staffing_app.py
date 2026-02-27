@@ -265,7 +265,12 @@ def get_scenario(scenario_name, seed, n_senior, n_junior,
 
 # ── Gantt chart ───────────────────────────────────────────────────────────────
 
-def build_gantt(results, all_assignments, staff, dc_floor=0):
+def build_gantt(results, all_assignments, people, staff, dc_floor=0, show_dc_band=False):
+    """
+    results: solver output (used for assignment lookup)
+    people: list of staff to render in this chart
+    staff: full staff list (used for DC floor calc)
+    """
     assignment_map = {a["name"]: a for a in all_assignments}
     colors = {
         "high":          "#c9a84c",
@@ -277,18 +282,9 @@ def build_gantt(results, all_assignments, staff, dc_floor=0):
     }
     result_names = {p["name"] for p in results}
 
-    # Sort all staff: seniors first, then juniors, then new hires; used staff before unused
-    def sort_key(p):
-        role_order = {"senior": 0, "junior": 1}
-        used = 0 if p["name"] in result_names else 1
-        return (used, role_order.get(p["seniority"], 2), p["name"])
-
-    people = sorted(staff, key=sort_key)
-
     fig = go.Figure()
 
     for person in people:
-        in_results = person["name"] in result_names
         label = f"{person['name']} ({person['seniority']})"
         person_result = next((r for r in results if r["name"] == person["name"]), None)
         assigned_names = person_result["assignments"] if person_result else []
@@ -333,7 +329,7 @@ def build_gantt(results, all_assignments, staff, dc_floor=0):
                            font=dict(size=9, color="#888"), yref="paper", xref="x")
 
     # DC floor shaded band — highlight weeks where seniors in DC hit the floor
-    if dc_floor > 0:
+    if dc_floor > 0 and show_dc_band:
         assignment_map_gantt = {a["name"]: a for a in all_assignments}
         senior_results = [p for p in results if p["seniority"] == "senior"]
         all_seniors_gantt = [p for p in staff if p["seniority"] == "senior"]
@@ -534,15 +530,31 @@ else:
     st.markdown("---")
     st.subheader("Schedule")
 
-    lcol1, lcol2, lcol3, lcol4, lcol5 = st.columns(5)
-    lcol1.markdown("🟨 High difficulty")
-    lcol2.markdown("🟦 Moderate difficulty")
-    lcol3.markdown("🟥 Unavailable / Leave")
-    lcol4.markdown("⬛ Not yet hired")
-    lcol5.markdown("🟪 Resigned")
+    lcol1, lcol2, lcol3, lcol4, lcol5, lcol6 = st.columns(6)
+    lcol1.markdown(f'<span style="color:{colors["high"]}">■</span> High difficulty', unsafe_allow_html=True)
+    lcol2.markdown(f'<span style="color:{colors["moderate"]}">■</span> Moderate difficulty', unsafe_allow_html=True)
+    lcol3.markdown(f'<span style="color:{colors["unavailable"]}">■</span> Unavailable / Leave', unsafe_allow_html=True)
+    lcol4.markdown(f'<span style="color:{colors["not_available"]}">■</span> Not yet hired', unsafe_allow_html=True)
+    lcol5.markdown(f'<span style="color:{colors["resigned"]}">■</span> Resigned', unsafe_allow_html=True)
+    lcol6.markdown(f'<span style="color:{colors["free"]}">■</span> Free / Available', unsafe_allow_html=True)
 
-    fig = build_gantt(results, all_assignments, staff, dc_floor=int(dc_floor))
-    st.plotly_chart(fig, use_container_width=True)
+    # Split staff into used and unused
+    result_names = {p["name"] for p in results}
+
+    def sort_by_role(p):
+        return ({"senior": 0, "junior": 1}.get(p["seniority"], 2), p["name"])
+
+    used_staff   = sorted([p for p in staff if p["name"] in result_names], key=sort_by_role)
+    unused_staff = sorted([p for p in staff if p["name"] not in result_names], key=sort_by_role)
+
+    st.markdown("##### Deployed Staff")
+    fig1 = build_gantt(results, all_assignments, used_staff, staff, dc_floor=int(dc_floor), show_dc_band=True)
+    st.plotly_chart(fig1, use_container_width=True)
+
+    if unused_staff:
+        st.markdown("##### Reserve / Not Needed for This Scenario")
+        fig2 = build_gantt(results, all_assignments, unused_staff, staff, dc_floor=0, show_dc_band=False)
+        st.plotly_chart(fig2, use_container_width=True)
 
     st.markdown("---")
     st.subheader("Assignment Details")

@@ -276,11 +276,19 @@ def build_gantt(results, all_assignments, staff, dc_floor=0):
         "free":          "#2a2a3a",
     }
     result_names = {p["name"] for p in results}
-    people = [p for p in staff if p["name"] in result_names]
+
+    # Sort all staff: seniors first, then juniors, then new hires; used staff before unused
+    def sort_key(p):
+        role_order = {"senior": 0, "junior": 1}
+        used = 0 if p["name"] in result_names else 1
+        return (used, role_order.get(p["seniority"], 2), p["name"])
+
+    people = sorted(staff, key=sort_key)
 
     fig = go.Figure()
 
     for person in people:
+        in_results = person["name"] in result_names
         label = f"{person['name']} ({person['seniority']})"
         person_result = next((r for r in results if r["name"] == person["name"]), None)
         assigned_names = person_result["assignments"] if person_result else []

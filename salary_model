@@ -16,7 +16,8 @@ def run_salary_sim(
     initial_senior_ii,
     initial_seniors,
     legacy_eligible_now,       # promote immediately
-    legacy_eligible_in_months, # promote at this month
+    legacy_eligible_count,      # how many become eligible later
+    legacy_eligible_in_months, # at which month they become eligible
     sim_years,
     # Fixed salaries
     junior_salary,
@@ -78,7 +79,7 @@ def run_salary_sim(
         uid += 1
 
     # Legacy juniors becoming eligible at specified month
-    if legacy_eligible_in_months > 0:
+    for i in range(legacy_eligible_count):
         staff.append({
             "id": uid, "role": "junior",
             "salary": junior_salary,
@@ -89,7 +90,7 @@ def run_salary_sim(
         })
         uid += 1
 
-    total_legacy = legacy_eligible_now + (1 if legacy_eligible_in_months > 0 else 0)
+    total_legacy = legacy_eligible_now + legacy_eligible_count
 
     # ── Generate resignation events ───────────────────────────────────────────
     def resignation_months_for_year(year_index, count):
@@ -241,10 +242,11 @@ st.sidebar.subheader("👥 Initial Team")
 initial_senior_ii        = st.sidebar.number_input("Initial Senior IIs", 0, 20, 2)
 initial_seniors          = st.sidebar.number_input("Initial Seniors", 0, 20, 9)
 st.sidebar.markdown("**Legacy Juniors**")
-legacy_eligible_now      = st.sidebar.number_input("Already eligible (promote immediately)", 0, 10, 2)
-legacy_eligible_in       = st.sidebar.number_input("Eligible in X months", 0, 24, 6)
-total_team = int(initial_senior_ii) + int(initial_seniors) + int(legacy_eligible_now) + (1 if legacy_eligible_in > 0 else 0)
-st.sidebar.caption(f"Total team: {total_team} staff")
+legacy_eligible_now      = st.sidebar.number_input("Already eligible for promotion", 0, 10, 2)
+legacy_eligible_count    = st.sidebar.number_input("Becoming eligible in the next year", 0, 10, 1)
+legacy_eligible_in       = st.sidebar.number_input("Months until they are eligible", 0, 24, 6) if legacy_eligible_count > 0 else 0
+total_team = int(initial_senior_ii) + int(initial_seniors) + int(legacy_eligible_now) + int(legacy_eligible_count)
+st.sidebar.caption(f"Total team: {total_team} staff — {int(legacy_eligible_now) + int(legacy_eligible_count)} legacy junior(s) to promote before restructuring")
 
 st.sidebar.subheader("📅 Simulation Length")
 sim_years = st.sidebar.slider("Simulation Length (years)", 1, 10, 5)
@@ -294,6 +296,7 @@ df, events, restructuring_month = run_salary_sim(
     initial_senior_ii=int(initial_senior_ii),
     initial_seniors=int(initial_seniors),
     legacy_eligible_now=int(legacy_eligible_now),
+    legacy_eligible_count=int(legacy_eligible_count),
     legacy_eligible_in_months=int(legacy_eligible_in),
     sim_years=sim_years,
     junior_salary=junior_salary,

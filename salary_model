@@ -10,6 +10,11 @@ st.markdown("""
 <style>
     .stSlider > div > div > div > div { background: #4a90d9 !important; }
     .stSlider > div > div > div > div > div { background: #4a90d9 !important; border-color: #4a90d9 !important; }
+    .stSlider [data-testid="stTickBarMin"],
+    .stSlider [data-testid="stTickBarMax"],
+    .stSlider [aria-valuetext] { color: #4a90d9 !important; }
+    .stSlider [data-testid="stThumbValue"] { color: #4a90d9 !important; }
+    div[data-testid="stSlider"] p { color: #4a90d9 !important; }
 </style>
 """, unsafe_allow_html=True)
 

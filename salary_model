@@ -5,6 +5,14 @@ import pandas as pd
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Salary Cost Model", layout="wide")
+
+st.markdown("""
+<style>
+    .stSlider > div > div > div > div { background: #4a90d9 !important; }
+    .stSlider > div > div > div > div > div { background: #4a90d9 !important; border-color: #4a90d9 !important; }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("Salary Cost Model")
 st.markdown("*Modeling total salary bill with legacy promotions, restructuring, and long-term cost trajectory*")
 st.markdown("---")
@@ -315,25 +323,32 @@ st.subheader("Year-over-Year Cost Summary")
 yearly_legacy = df_legacy.groupby("year")["total_cost"].last()
 
 summary_rows = []
-prev_cost = df_legacy.iloc[0]["total_cost"]
+base_cost = df_legacy.iloc[0]["total_cost"]
+prev_cost = base_cost
 
 # Year 0 — current baseline
 summary_rows.append({
     "Year": "Now (Year 0)",
-    "Year-End Salary Bill": f"${prev_cost:,.0f}",
+    "Year-End Salary Bill": f"${base_cost:,.0f}",
     "Change from Prior Year ($)": "—",
     "Change from Prior Year (%)": "—",
+    "Change from Year 0 ($)": "—",
+    "Change from Year 0 (%)": "—",
 })
 
 for y in range(1, sim_years + 1):
     lc = yearly_legacy.get(y, prev_cost)
-    yoy_change = lc - prev_cost
-    yoy_pct    = (yoy_change / prev_cost * 100) if prev_cost > 0 else 0
+    yoy_change  = lc - prev_cost
+    yoy_pct     = (yoy_change / prev_cost * 100) if prev_cost > 0 else 0
+    cum_change  = lc - base_cost
+    cum_pct     = (cum_change / base_cost * 100) if base_cost > 0 else 0
     summary_rows.append({
         "Year": f"Year {y}",
         "Year-End Salary Bill": f"${lc:,.0f}",
         "Change from Prior Year ($)": f"${yoy_change:+,.0f}",
         "Change from Prior Year (%)": f"{yoy_pct:+.1f}%",
+        "Change from Year 0 ($)": f"${cum_change:+,.0f}",
+        "Change from Year 0 (%)": f"{cum_pct:+.1f}%",
     })
     prev_cost = lc
 
@@ -366,9 +381,9 @@ fig_compare.add_trace(go.Scatter(
 ))
 
 if restructuring_month:
-    fig_compare.add_vline(x=restructuring_month, line_width=2, line_color="#e8734a",
+    fig_compare.add_vline(x=restructuring_month, line_width=2, line_color="#4caf7d",
                           line_dash="dash", annotation_text="Restructuring",
-                          annotation_position="top", annotation_font_color="#e8734a")
+                          annotation_position="top", annotation_font_color="#4caf7d")
 
 for y in range(1, sim_years + 1):
     fig_compare.add_vline(x=y * 12, line_width=1, line_color="#2a2a3a",
@@ -413,9 +428,9 @@ fig1.add_trace(go.Scatter(
 ))
 
 if restructuring_month:
-    fig1.add_vline(x=restructuring_month, line_width=2, line_color="#e8734a",
+    fig1.add_vline(x=restructuring_month, line_width=2, line_color="#4caf7d",
                    line_dash="dash", annotation_text="Restructuring",
-                   annotation_position="top", annotation_font_color="#e8734a")
+                   annotation_position="top", annotation_font_color="#4caf7d")
 
 for y in range(1, sim_years + 1):
     fig1.add_vline(x=y * 12, line_width=1, line_color="#2a2a3a",
@@ -462,9 +477,9 @@ fig2.add_trace(go.Scatter(
 ))
 
 if restructuring_month:
-    fig2.add_vline(x=restructuring_month, line_width=2, line_color="#e8734a",
+    fig2.add_vline(x=restructuring_month, line_width=2, line_color="#4caf7d",
                    line_dash="dash", annotation_text="Restructuring",
-                   annotation_position="top", annotation_font_color="#e8734a")
+                   annotation_position="top", annotation_font_color="#4caf7d")
 
 for y in range(1, sim_years + 1):
     fig2.add_vline(x=y * 12, line_width=1, line_color="#2a2a3a")

@@ -450,7 +450,7 @@ fig1.add_trace(go.Scatter(
     hovertemplate="Month %{x}<br>Senior II: $%{y:,.0f}<extra></extra>"
 ))
 fig1.add_trace(go.Scatter(
-    x=df_legacy_chart["month"], y=df_legacy_chart["senior_ii_cost_smooth"] + df_legacy["senior_cost_smooth"],
+    x=df_legacy_chart["month"], y=df_legacy_chart["senior_ii_cost_smooth"] + df_legacy_chart["senior_cost_smooth"],
     name="+ Seniors", mode="lines",
     line=dict(color="#c9a84c", width=2),
     fill="tonexty", fillcolor="rgba(201,168,76,0.15)",

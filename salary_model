@@ -12,34 +12,27 @@ st.markdown("---")
 # ── Simulation engine ─────────────────────────────────────────────────────────
 
 def run_salary_sim(
-    # Initial team
     initial_senior_ii,
     initial_seniors,
-    legacy_eligible_now,       # promote immediately
-    legacy_eligible_count,      # how many become eligible later
-    legacy_eligible_in_months, # at which month they become eligible
+    legacy_eligible_now,
+    legacy_eligible_count,
+    legacy_eligible_in_months,
     sim_years,
-    # Fixed salaries
     junior_salary,
     senior_salary,
     senior_ii_salary,
-    # Raises
     annual_raise_pct,
-    # Post-restructuring rules
     new_eligibility_months,
     senior_cap_pct,
-    # Resignations by year
     senior_ii_resignations_by_year,
     senior_resignations_by_year,
     junior_resignations_by_year,
-    # Hiring delay
-    new_hire_delay_months,
+    legacy_mode=True,   # True = legacy exception, False = cap from day one
     seed=1
 ):
     random.seed(seed)
     sim_months = sim_years * 12
 
-    # ── Initialize staff ──────────────────────────────────────────────────────
     staff = []
     uid = 0
     restructuring_month = None
@@ -50,8 +43,7 @@ def run_salary_sim(
             "salary": senior_ii_salary,
             "joined_month": -random.randint(12, 60),
             "eligible_month": None,
-            "legacy": False,
-            "status": "active"
+            "legacy": False, "status": "active"
         })
         uid += 1
 
@@ -61,38 +53,41 @@ def run_salary_sim(
             "salary": senior_salary,
             "joined_month": -random.randint(12, 60),
             "eligible_month": None,
-            "legacy": False,
-            "status": "active"
+            "legacy": False, "status": "active"
         })
         uid += 1
 
-    # Legacy juniors already eligible — promote at month 0
+    # Legacy juniors already eligible
     for i in range(legacy_eligible_now):
         staff.append({
             "id": uid, "role": "junior",
             "salary": junior_salary,
-            "joined_month": -18,  # already hit 18 months
-            "eligible_month": 0,  # eligible immediately
-            "legacy": True,
-            "status": "active"
+            "joined_month": -18,
+            "eligible_month": 0,
+            "legacy": True, "status": "active"
         })
         uid += 1
 
-    # Legacy juniors becoming eligible at specified month
+    # Legacy juniors becoming eligible later
     for i in range(legacy_eligible_count):
         staff.append({
             "id": uid, "role": "junior",
             "salary": junior_salary,
             "joined_month": -18 + legacy_eligible_in_months,
             "eligible_month": legacy_eligible_in_months,
-            "legacy": True,
-            "status": "active"
+            "legacy": True, "status": "active"
         })
         uid += 1
 
     total_legacy = legacy_eligible_now + legacy_eligible_count
 
-    # ── Generate resignation events ───────────────────────────────────────────
+    # If pipeline mode, no legacy — all juniors start with new eligibility rules
+    if not legacy_mode:
+        for s in staff:
+            if s["role"] == "junior":
+                s["legacy"] = False
+                s["eligible_month"] = new_eligibility_months
+
     def resignation_months_for_year(year_index, count):
         year_start = year_index * 12
         year_end = year_start + 12
@@ -108,13 +103,11 @@ def run_salary_sim(
         senior_resign_months.extend(resignation_months_for_year(y, senior_resignations_by_year[y] if y < len(senior_resignations_by_year) else 0))
         junior_resign_months.extend(resignation_months_for_year(y, junior_resignations_by_year[y] if y < len(junior_resignations_by_year) else 0))
 
-    # ── Tracking ──────────────────────────────────────────────────────────────
     history = []
     events = []
     open_promotion_slots = 0
     pending_hires = []
 
-    # ── Month by month simulation ─────────────────────────────────────────────
     for month in range(sim_months):
 
         # Annual raises
@@ -132,73 +125,71 @@ def run_salary_sim(
                     "salary": junior_salary,
                     "joined_month": month,
                     "eligible_month": month + new_eligibility_months,
-                    "legacy": False,
-                    "status": "active"
+                    "legacy": False, "status": "active"
                 })
                 uid += 1
                 pending_hires.remove(hire)
-                events.append({"month": month, "event": f"New junior hire joined (eligible month {month + new_eligibility_months})"})
+                events.append({"month": month, "event": f"New junior hire joined"})
 
-        # Active staff
-        active = [s for s in staff if s["status"] == "active"]
+        active  = [s for s in staff if s["status"] == "active"]
         juniors = [s for s in active if s["role"] == "junior"]
         legacy_remaining = [s for s in juniors if s["legacy"]]
 
-        # Check restructuring trigger
-        if restructuring_month is None and total_legacy > 0 and len(legacy_remaining) == 0 and month > 0:
+        # Check restructuring trigger (legacy mode only)
+        if legacy_mode and restructuring_month is None and total_legacy > 0 and len(legacy_remaining) == 0 and month > 0:
             restructuring_month = month
-            events.append({"month": month, "event": f"⭐ RESTRUCTURING — all legacy juniors promoted or departed. Senior cap ({int(senior_cap_pct*100)}%) and {new_eligibility_months}-month eligibility now apply."})
+            events.append({"month": month, "event": f"⭐ RESTRUCTURING — all legacy juniors promoted or departed. {new_eligibility_months}-month eligibility and {int(senior_cap_pct*100)}% cap now apply."})
 
-        # Promotions
         eligible_juniors = sorted(
             [s for s in juniors if s["eligible_month"] is not None and s["eligible_month"] <= month],
             key=lambda s: s["eligible_month"]
         )
 
-        if restructuring_month is None:
-            # Before restructuring: promote all eligible legacy juniors immediately, no cap check
+        # Promotions
+        if legacy_mode and restructuring_month is None:
+            # Before restructuring: promote legacy juniors immediately, no cap
             for candidate in [s for s in eligible_juniors if s["legacy"]]:
                 candidate["role"] = "senior"
                 candidate["salary"] = senior_salary
                 candidate["eligible_month"] = None
                 candidate["legacy"] = False
-                events.append({"month": month, "event": f"Legacy junior promoted to Senior (salary: ${senior_salary:,.0f})"})
+                events.append({"month": month, "event": f"Legacy junior promoted to Senior (${senior_salary:,.0f})"})
         else:
-            # After restructuring: cap applies, slots needed
+            # After restructuring (or pipeline mode): cap applies
             while open_promotion_slots > 0 and eligible_juniors:
                 candidate = eligible_juniors.pop(0)
                 candidate["role"] = "senior"
                 candidate["salary"] = senior_salary
                 candidate["eligible_month"] = None
                 open_promotion_slots -= 1
-                events.append({"month": month, "event": f"Junior promoted to Senior (salary: ${senior_salary:,.0f})"})
+                events.append({"month": month, "event": f"Junior promoted to Senior (${senior_salary:,.0f})"})
 
-        # Senior II resignations — replaced by junior
+        # Senior II resignations
         if month in sii_resign_months:
             active_sii = [s for s in staff if s["status"] == "active" and s["role"] == "senior_ii"]
             if active_sii:
                 leaver = random.choice(active_sii)
                 leaver["status"] = "resigned"
-                events.append({"month": month, "event": f"Senior II resigned (salary was ${leaver['salary']:,.0f})"})
-                pending_hires.append({"available_month": month + new_hire_delay_months})
+                events.append({"month": month, "event": f"Senior II resigned (${leaver['salary']:,.0f})"})
+                pending_hires.append({"available_month": month})
 
-        # Senior resignations — replaced by junior, may open promotion slot
+        # Senior resignations
         if month in senior_resign_months:
             active_seniors = [s for s in staff if s["status"] == "active" and s["role"] == "senior"]
             if active_seniors:
                 leaver = random.choice(active_seniors)
                 leaver["status"] = "resigned"
-                events.append({"month": month, "event": f"Senior resigned (salary was ${leaver['salary']:,.0f})"})
-                pending_hires.append({"available_month": month + new_hire_delay_months})
-                # Only open promotion slot after restructuring
-                if restructuring_month is not None:
+                events.append({"month": month, "event": f"Senior resigned (${leaver['salary']:,.0f})"})
+                pending_hires.append({"available_month": month})
+                # Open promotion slot only after restructuring (or in pipeline mode always)
+                if restructuring_month is not None or not legacy_mode:
                     current_seniors = len([s for s in staff if s["status"] == "active" and s["role"] == "senior"])
-                    current_total = len([s for s in staff if s["status"] == "active"])
+                    current_total   = len([s for s in staff if s["status"] == "active"])
                     if current_seniors <= int(current_total * senior_cap_pct):
                         open_promotion_slots += 1
                         events.append({"month": month, "event": "Promotion slot opened"})
 
-        # Junior resignations — replaced by junior
+        # Junior resignations
         if month in junior_resign_months:
             active_juniors = [s for s in staff if s["status"] == "active" and s["role"] == "junior"]
             if active_juniors:
@@ -206,10 +197,10 @@ def run_salary_sim(
                 leaver = random.choice(non_legacy if non_legacy else active_juniors)
                 was_legacy = leaver["legacy"]
                 leaver["status"] = "resigned"
-                events.append({"month": month, "event": f"{'Legacy junior' if was_legacy else 'Junior'} resigned (salary was ${leaver['salary']:,.0f})"})
-                pending_hires.append({"available_month": month + new_hire_delay_months})
+                events.append({"month": month, "event": f"{'Legacy junior' if was_legacy else 'Junior'} resigned (${leaver['salary']:,.0f})"})
+                pending_hires.append({"available_month": month})
 
-        # Monthly snapshot
+        # Snapshot
         active      = [s for s in staff if s["status"] == "active"]
         sii_now     = [s for s in active if s["role"] == "senior_ii"]
         seniors_now = [s for s in active if s["role"] == "senior"]
@@ -239,12 +230,12 @@ def run_salary_sim(
 st.sidebar.header("Simulation Controls")
 
 st.sidebar.subheader("👥 Initial Team")
-initial_senior_ii        = st.sidebar.number_input("Initial Senior IIs", 0, 20, 2)
-initial_seniors          = st.sidebar.number_input("Initial Seniors", 0, 20, 9)
+initial_senior_ii     = st.sidebar.number_input("Initial Senior IIs", 0, 20, 2)
+initial_seniors       = st.sidebar.number_input("Initial Seniors", 0, 20, 9)
 st.sidebar.markdown("**Legacy Juniors**")
-legacy_eligible_now      = st.sidebar.number_input("Already eligible for promotion", 0, 10, 2)
-legacy_eligible_count    = st.sidebar.number_input("Becoming eligible in the next year", 0, 10, 1)
-legacy_eligible_in       = st.sidebar.number_input("Months until they are eligible", 0, 24, 6) if legacy_eligible_count > 0 else 0
+legacy_eligible_now   = st.sidebar.number_input("Already eligible for promotion", 0, 10, 2)
+legacy_eligible_count = st.sidebar.number_input("Becoming eligible soon", 0, 10, 1)
+legacy_eligible_in    = st.sidebar.number_input("Months until eligible", 0, 24, 6) if int(legacy_eligible_count) > 0 else 0
 total_team = int(initial_senior_ii) + int(initial_seniors) + int(legacy_eligible_now) + int(legacy_eligible_count)
 st.sidebar.caption(f"Total team: {total_team} staff — {int(legacy_eligible_now) + int(legacy_eligible_count)} legacy junior(s) to promote before restructuring")
 
@@ -284,15 +275,12 @@ for y in range(sim_years):
     val = st.sidebar.number_input(f"Year {y+1}  ", 0, 10, 0, key=f"jr_{y}")
     junior_res.append(int(val))
 
-st.sidebar.subheader("🏢 Hiring")
-new_hire_delay = st.sidebar.slider("New Hire Start Delay (months)", 0, 12, 3)
-
 st.sidebar.subheader("🎲 Randomization")
 seed = st.sidebar.slider("Seed", 1, 100, 1)
 
-# ── Run simulation ────────────────────────────────────────────────────────────
+# ── Run both simulations ──────────────────────────────────────────────────────
 
-df, events, restructuring_month = run_salary_sim(
+common = dict(
     initial_senior_ii=int(initial_senior_ii),
     initial_seniors=int(initial_seniors),
     legacy_eligible_now=int(legacy_eligible_now),
@@ -308,58 +296,106 @@ df, events, restructuring_month = run_salary_sim(
     senior_ii_resignations_by_year=sii_res,
     senior_resignations_by_year=senior_res,
     junior_resignations_by_year=junior_res,
-    new_hire_delay_months=new_hire_delay,
-    seed=seed
+    seed=seed,
 )
 
-# ── Summary metrics ───────────────────────────────────────────────────────────
+df_legacy, events_legacy, restructuring_month = run_salary_sim(**common, legacy_mode=True)
+df_pipeline, _, _                             = run_salary_sim(**common, legacy_mode=False)
 
-st.subheader("Cost Summary")
+# ── Year-over-year savings table ──────────────────────────────────────────────
 
-start_cost = df.iloc[0]["total_cost"]
-end_cost   = df.iloc[-1]["total_cost"]
-peak_cost  = df["total_cost"].max()
-low_cost   = df["total_cost"].min()
-delta_pct  = (end_cost - start_cost) / start_cost * 100
+st.subheader("Year-over-Year Cost Summary")
 
-col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Starting Annual Bill", f"${start_cost:,.0f}")
-col2.metric("Ending Annual Bill",   f"${end_cost:,.0f}",
-            delta=f"{delta_pct:+.1f}%", delta_color="inverse")
-col3.metric("Peak Annual Bill",     f"${peak_cost:,.0f}")
-col4.metric("Lowest Annual Bill",   f"${low_cost:,.0f}")
-col5.metric("Restructuring",
-            f"Month {restructuring_month} (Yr {restructuring_month // 12 + 1})" if restructuring_month else "Not triggered",
-            delta=None)
+yearly_legacy   = df_legacy.groupby("year")["total_cost"].last()
+yearly_pipeline = df_pipeline.groupby("year")["total_cost"].last()
+
+summary_rows = []
+prev_legacy   = df_legacy.iloc[0]["total_cost"]
+prev_pipeline = df_pipeline.iloc[0]["total_cost"]
+
+for y in range(1, sim_years + 1):
+    lc = yearly_legacy.get(y, prev_legacy)
+    pc = yearly_pipeline.get(y, prev_pipeline)
+    summary_rows.append({
+        "Year": y,
+        "Legacy Path Cost": f"${lc:,.0f}",
+        "Pipeline Path Cost": f"${pc:,.0f}",
+        "Legacy YoY Change": f"${lc - prev_legacy:+,.0f}" if y > 1 else "—",
+        "Pipeline YoY Change": f"${pc - prev_pipeline:+,.0f}" if y > 1 else "—",
+        "Difference (Legacy vs Pipeline)": f"${lc - pc:+,.0f}",
+    })
+    prev_legacy   = lc
+    prev_pipeline = pc
+
+summary_df = pd.DataFrame(summary_rows)
+st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
 if restructuring_month:
-    st.success(f"✅ Restructuring triggered at month {restructuring_month} — all legacy juniors promoted or departed. New {new_eligibility}-month eligibility and {int(senior_cap_pct*100)}% senior cap now apply.")
+    st.success(f"✅ Restructuring triggered at month {restructuring_month} (Year {restructuring_month // 12 + 1}) — legacy promotions complete, new rules now apply.")
 else:
-    st.warning("⚠️ Restructuring not yet triggered — legacy juniors still in pipeline. Consider extending the simulation length.")
+    st.warning("⚠️ Restructuring not yet triggered within simulation window — extend simulation length to see full trajectory.")
 
 st.markdown("---")
 
-# ── Chart 1: Total salary bill ────────────────────────────────────────────────
+# ── Chart 1: Scenario comparison ─────────────────────────────────────────────
 
-st.subheader("Total Annual Salary Bill Over Time")
+st.subheader("Scenario Comparison: Legacy Path vs Pipeline Path")
+
+fig_compare = go.Figure()
+fig_compare.add_trace(go.Scatter(
+    x=df_legacy["month"], y=df_legacy["total_cost"],
+    name="Legacy Path (promote all 3, then restructure)",
+    mode="lines", line=dict(color="#c9a84c", width=2),
+    hovertemplate="Month %{x}<br>Legacy: $%{y:,.0f}<extra></extra>"
+))
+fig_compare.add_trace(go.Scatter(
+    x=df_pipeline["month"], y=df_pipeline["total_cost"],
+    name="Pipeline Path (cap from day one, no exceptions)",
+    mode="lines", line=dict(color="#7eb8c9", width=2),
+    hovertemplate="Month %{x}<br>Pipeline: $%{y:,.0f}<extra></extra>"
+))
+
+if restructuring_month:
+    fig_compare.add_vline(x=restructuring_month, line_width=2, line_color="#e8734a",
+                          line_dash="dash", annotation_text="Restructuring",
+                          annotation_position="top", annotation_font_color="#e8734a")
+
+for y in range(1, sim_years + 1):
+    fig_compare.add_vline(x=y * 12, line_width=1, line_color="#2a2a3a",
+                          annotation_text=f"Yr {y}", annotation_position="top")
+
+fig_compare.update_layout(
+    paper_bgcolor="#0f0f14", plot_bgcolor="#0f0f14",
+    font=dict(color="#e8e4d9", family="Georgia"),
+    xaxis=dict(title="Month", gridcolor="#2a2a3a", tickfont=dict(size=10)),
+    yaxis=dict(title="Annual Salary Cost ($)", gridcolor="#2a2a3a", tickformat="$,.0f"),
+    legend=dict(bgcolor="#1a1a24", bordercolor="#2a2a3a"),
+    height=400, margin=dict(l=80, r=20, t=40, b=40),
+    hoverlabel=dict(bgcolor="#1a1a24"),
+)
+st.plotly_chart(fig_compare, use_container_width=True)
+
+# ── Chart 2: Legacy path breakdown ───────────────────────────────────────────
+
+st.subheader("Legacy Path — Cost Breakdown by Level")
 
 fig1 = go.Figure()
 fig1.add_trace(go.Scatter(
-    x=df["month"], y=df["senior_ii_cost"],
+    x=df_legacy["month"], y=df_legacy["senior_ii_cost"],
     name="Senior II", mode="lines",
     line=dict(color="#9b7eb8", width=2),
     fill="tozeroy", fillcolor="rgba(155,126,184,0.15)",
     hovertemplate="Month %{x}<br>Senior II: $%{y:,.0f}<extra></extra>"
 ))
 fig1.add_trace(go.Scatter(
-    x=df["month"], y=df["senior_ii_cost"] + df["senior_cost"],
+    x=df_legacy["month"], y=df_legacy["senior_ii_cost"] + df_legacy["senior_cost"],
     name="+ Seniors", mode="lines",
     line=dict(color="#c9a84c", width=2),
     fill="tonexty", fillcolor="rgba(201,168,76,0.15)",
-    hovertemplate="Month %{x}<br>Senior II + Senior: $%{y:,.0f}<extra></extra>"
+    hovertemplate="Month %{x}<br>+ Seniors: $%{y:,.0f}<extra></extra>"
 ))
 fig1.add_trace(go.Scatter(
-    x=df["month"], y=df["total_cost"],
+    x=df_legacy["month"], y=df_legacy["total_cost"],
     name="Total", mode="lines",
     line=dict(color="#e8e4d9", width=2),
     fill="tonexty", fillcolor="rgba(126,184,201,0.15)",
@@ -381,36 +417,36 @@ fig1.update_layout(
     xaxis=dict(title="Month", gridcolor="#2a2a3a", tickfont=dict(size=10)),
     yaxis=dict(title="Annual Salary Cost ($)", gridcolor="#2a2a3a", tickformat="$,.0f"),
     legend=dict(bgcolor="#1a1a24", bordercolor="#2a2a3a"),
-    height=420, margin=dict(l=80, r=20, t=40, b=40),
+    height=380, margin=dict(l=80, r=20, t=40, b=40),
     hoverlabel=dict(bgcolor="#1a1a24"),
 )
 st.plotly_chart(fig1, use_container_width=True)
 
-# ── Chart 2: Team composition ─────────────────────────────────────────────────
+# ── Chart 3: Team composition ─────────────────────────────────────────────────
 
-st.subheader("Team Composition Over Time")
+st.subheader("Team Composition Over Time (Legacy Path)")
 
 fig2 = go.Figure()
 fig2.add_trace(go.Scatter(
-    x=df["month"], y=df["n_senior_ii"],
+    x=df_legacy["month"], y=df_legacy["n_senior_ii"],
     name="Senior II", mode="lines",
     line=dict(color="#9b7eb8", width=2),
     fill="tozeroy", fillcolor="rgba(155,126,184,0.15)"
 ))
 fig2.add_trace(go.Scatter(
-    x=df["month"], y=df["n_senior_ii"] + df["n_seniors"],
+    x=df_legacy["month"], y=df_legacy["n_senior_ii"] + df_legacy["n_seniors"],
     name="+ Seniors", mode="lines",
     line=dict(color="#c9a84c", width=2),
     fill="tonexty", fillcolor="rgba(201,168,76,0.15)"
 ))
 fig2.add_trace(go.Scatter(
-    x=df["month"], y=df["total_staff"],
+    x=df_legacy["month"], y=df_legacy["total_staff"],
     name="Total Staff", mode="lines",
     line=dict(color="#e8e4d9", width=2),
     fill="tonexty", fillcolor="rgba(126,184,201,0.15)"
 ))
 fig2.add_trace(go.Scatter(
-    x=df["month"], y=df["n_legacy"],
+    x=df_legacy["month"], y=df_legacy["n_legacy"],
     name="Legacy Juniors Remaining", mode="lines",
     line=dict(color="#e8734a", width=2, dash="dot"),
 ))
@@ -429,41 +465,16 @@ fig2.update_layout(
     xaxis=dict(title="Month", gridcolor="#2a2a3a"),
     yaxis=dict(title="Number of Staff", gridcolor="#2a2a3a"),
     legend=dict(bgcolor="#1a1a24", bordercolor="#2a2a3a"),
-    height=320, margin=dict(l=80, r=20, t=40, b=40),
+    height=300, margin=dict(l=80, r=20, t=40, b=40),
     hoverlabel=dict(bgcolor="#1a1a24"),
 )
 st.plotly_chart(fig2, use_container_width=True)
 
-# ── Year by year summary ──────────────────────────────────────────────────────
-
-st.markdown("---")
-st.subheader("Year by Year Summary")
-
-yearly = df.groupby("year").agg(
-    Avg_SeniorII=("n_senior_ii", "mean"),
-    Avg_Seniors=("n_seniors", "mean"),
-    Avg_Juniors=("n_juniors", "mean"),
-    Avg_Total=("total_staff", "mean"),
-    YearEnd_Bill=("total_cost", "last"),
-    SeniorII_Cost=("senior_ii_cost", "last"),
-    Senior_Cost=("senior_cost", "last"),
-    Junior_Cost=("junior_cost", "last"),
-).reset_index()
-
-for col in ["Avg_SeniorII", "Avg_Seniors", "Avg_Juniors", "Avg_Total"]:
-    yearly[col] = yearly[col].round(1)
-for col in ["YearEnd_Bill", "SeniorII_Cost", "Senior_Cost", "Junior_Cost"]:
-    yearly[col] = yearly[col].apply(lambda x: f"${x:,.0f}")
-
-yearly.columns = ["Year", "Avg Senior II", "Avg Seniors", "Avg Juniors",
-                  "Avg Total", "Year-End Bill", "Senior II Cost", "Senior Cost", "Junior Cost"]
-st.dataframe(yearly, use_container_width=True, hide_index=True)
-
 # ── Event log ─────────────────────────────────────────────────────────────────
 
 st.markdown("---")
-with st.expander("Show event log"):
-    event_df = pd.DataFrame(events)
+with st.expander("Show event log (Legacy Path)"):
+    event_df = pd.DataFrame(events_legacy)
     event_df["Year"] = (event_df["month"] // 12) + 1
     event_df["Month of Year"] = event_df["month"] % 12 + 1
     event_df = event_df.rename(columns={"month": "Overall Month", "event": "Event"})

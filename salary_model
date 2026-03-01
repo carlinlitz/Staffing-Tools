@@ -121,6 +121,28 @@ def run_salary_sim(
     open_promotion_slots = 0
     pending_hires = []
 
+    # Capture Year 0 baseline BEFORE any promotions or events
+    pre_active  = [s for s in staff if s["status"] == "active"]
+    pre_sii     = [s for s in pre_active if s["role"] == "senior_ii"]
+    pre_seniors = [s for s in pre_active if s["role"] == "senior"]
+    pre_juniors = [s for s in pre_active if s["role"] == "junior"]
+    year_zero_cost = sum(s["salary"] for s in pre_active)
+    year_zero_snapshot = {
+        "month": -1,
+        "year": 0,
+        "month_of_year": 0,
+        "n_senior_ii": len(pre_sii),
+        "n_seniors": len(pre_seniors),
+        "n_juniors": len(pre_juniors),
+        "n_legacy": sum(1 for s in pre_juniors if s["legacy"]),
+        "total_staff": len(pre_active),
+        "senior_ii_cost": sum(s["salary"] for s in pre_sii),
+        "senior_cost": sum(s["salary"] for s in pre_seniors),
+        "junior_cost": sum(s["salary"] for s in pre_juniors),
+        "total_cost": year_zero_cost,
+    }
+    history.append(year_zero_snapshot)
+
     for month in range(sim_months):
 
         # Annual raises
@@ -235,7 +257,7 @@ def run_salary_sim(
             "total_cost": sum(s["salary"] for s in active),
         })
 
-    return pd.DataFrame(history), events, restructuring_month
+    return pd.DataFrame(history), events, restructuring_month, year_zero_cost
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -312,26 +334,34 @@ common = dict(
     seed=seed,
 )
 
-df_legacy, events_legacy, restructuring_month = run_salary_sim(**common, legacy_mode=True)
-df_pipeline, _, _                             = run_salary_sim(**common, legacy_mode=False)
+df_legacy, events_legacy, restructuring_month, year_zero_cost = run_salary_sim(**common, legacy_mode=True)
+df_pipeline, _, _, _                                              = run_salary_sim(**common, legacy_mode=False)
+
+# Chart dataframes exclude the Year 0 pre-snapshot (month -1)
+df_legacy_chart   = df_legacy[df_legacy["month"] >= 0].copy()
+df_pipeline_chart = df_pipeline[df_pipeline["month"] >= 0].copy()
 
 # Apply 3-month rolling average to smooth month-to-month noise for charts
 window = 3
 for col in ["total_cost", "senior_ii_cost", "senior_cost", "junior_cost"]:
-    df_legacy[f"{col}_smooth"]   = df_legacy[col].rolling(window, center=True, min_periods=1).mean()
-    df_pipeline[f"{col}_smooth"] = df_pipeline[col].rolling(window, center=True, min_periods=1).mean()
+    df_legacy_chart[f"{col}_smooth"]   = df_legacy_chart[col].rolling(window, center=True, min_periods=1).mean()
+    df_pipeline_chart[f"{col}_smooth"] = df_pipeline_chart[col].rolling(window, center=True, min_periods=1).mean()
 
 # ── Year-over-year savings table ──────────────────────────────────────────────
 
 st.subheader("Year-over-Year Cost Summary")
 
-yearly_legacy = df_legacy.groupby("year")["total_cost"].last()
+# Use exact month 11, 23, 35... for end-of-year values (unsmoothed)
+def get_year_end_cost(df, year):
+    end_month = year * 12 - 1  # month 11 = end of year 1, etc.
+    row = df[df["month"] == end_month]
+    return row["total_cost"].values[0] if len(row) > 0 else None
 
 summary_rows = []
-base_cost = df_legacy.iloc[0]["total_cost"]
+base_cost = year_zero_cost
 prev_cost = base_cost
 
-# Year 0 — current baseline
+# Year 0 — pre-promotion baseline
 summary_rows.append({
     "Year": "Now (Year 0)",
     "Year-End Salary Bill": f"${base_cost:,.0f}",
@@ -342,11 +372,13 @@ summary_rows.append({
 })
 
 for y in range(1, sim_years + 1):
-    lc = yearly_legacy.get(y, prev_cost)
-    yoy_change  = lc - prev_cost
-    yoy_pct     = (yoy_change / prev_cost * 100) if prev_cost > 0 else 0
-    cum_change  = lc - base_cost
-    cum_pct     = (cum_change / base_cost * 100) if base_cost > 0 else 0
+    lc = get_year_end_cost(df_legacy, y)
+    if lc is None:
+        continue
+    yoy_change = lc - prev_cost
+    yoy_pct    = (yoy_change / prev_cost * 100) if prev_cost > 0 else 0
+    cum_change = lc - base_cost
+    cum_pct    = (cum_change / base_cost * 100) if base_cost > 0 else 0
     summary_rows.append({
         "Year": f"Year {y}",
         "Year-End Salary Bill": f"${lc:,.0f}",
@@ -373,13 +405,13 @@ st.subheader("Scenario Comparison — Legacy Path vs Pipeline Path")
 
 fig_compare = go.Figure()
 fig_compare.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["total_cost_smooth"],
+    x=df_legacy_chart["month"], y=df_legacy_chart["total_cost_smooth"],
     name="Legacy Path (promote all 3, then restructure)",
     mode="lines", line=dict(color="#c9a84c", width=2),
     hovertemplate="Month %{x}<br>Legacy: $%{y:,.0f}<extra></extra>"
 ))
 fig_compare.add_trace(go.Scatter(
-    x=df_pipeline["month"], y=df_pipeline["total_cost_smooth"],
+    x=df_pipeline_chart["month"], y=df_pipeline_chart["total_cost_smooth"],
     name="Pipeline Path (cap from day one, no exceptions)",
     mode="lines", line=dict(color="#7eb8c9", width=2),
     hovertemplate="Month %{x}<br>Pipeline: $%{y:,.0f}<extra></extra>"
@@ -411,21 +443,21 @@ st.subheader("Cost Breakdown by Level — Legacy Path")
 
 fig1 = go.Figure()
 fig1.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["senior_ii_cost_smooth"],
+    x=df_legacy_chart["month"], y=df_legacy_chart["senior_ii_cost_smooth"],
     name="Senior II", mode="lines",
     line=dict(color="#9b7eb8", width=2),
     fill="tozeroy", fillcolor="rgba(155,126,184,0.15)",
     hovertemplate="Month %{x}<br>Senior II: $%{y:,.0f}<extra></extra>"
 ))
 fig1.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["senior_ii_cost_smooth"] + df_legacy["senior_cost_smooth"],
+    x=df_legacy_chart["month"], y=df_legacy_chart["senior_ii_cost_smooth"] + df_legacy["senior_cost_smooth"],
     name="+ Seniors", mode="lines",
     line=dict(color="#c9a84c", width=2),
     fill="tonexty", fillcolor="rgba(201,168,76,0.15)",
     hovertemplate="Month %{x}<br>+ Seniors: $%{y:,.0f}<extra></extra>"
 ))
 fig1.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["total_cost_smooth"],
+    x=df_legacy_chart["month"], y=df_legacy_chart["total_cost_smooth"],
     name="Total", mode="lines",
     line=dict(color="#e8e4d9", width=2),
     fill="tonexty", fillcolor="rgba(126,184,201,0.15)",
@@ -458,25 +490,25 @@ st.subheader("Team Composition Over Time — Legacy Path")
 
 fig2 = go.Figure()
 fig2.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["n_senior_ii"],
+    x=df_legacy_chart["month"], y=df_legacy_chart["n_senior_ii"],
     name="Senior II", mode="lines",
     line=dict(color="#9b7eb8", width=2),
     fill="tozeroy", fillcolor="rgba(155,126,184,0.15)"
 ))
 fig2.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["n_senior_ii"] + df_legacy["n_seniors"],
+    x=df_legacy_chart["month"], y=df_legacy_chart["n_senior_ii"] + df_legacy["n_seniors"],
     name="+ Seniors", mode="lines",
     line=dict(color="#c9a84c", width=2),
     fill="tonexty", fillcolor="rgba(201,168,76,0.15)"
 ))
 fig2.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["total_staff"],
+    x=df_legacy_chart["month"], y=df_legacy_chart["total_staff"],
     name="Total Staff", mode="lines",
     line=dict(color="#e8e4d9", width=2),
     fill="tonexty", fillcolor="rgba(126,184,201,0.15)"
 ))
 fig2.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["n_legacy"],
+    x=df_legacy_chart["month"], y=df_legacy_chart["n_legacy"],
     name="Legacy Juniors Remaining", mode="lines",
     line=dict(color="#e8734a", width=2, dash="dot"),
 ))

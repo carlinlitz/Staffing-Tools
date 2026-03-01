@@ -302,6 +302,12 @@ common = dict(
 df_legacy, events_legacy, restructuring_month = run_salary_sim(**common, legacy_mode=True)
 df_pipeline, _, _                             = run_salary_sim(**common, legacy_mode=False)
 
+# Apply 3-month rolling average to smooth month-to-month noise for charts
+window = 3
+for col in ["total_cost", "senior_ii_cost", "senior_cost", "junior_cost"]:
+    df_legacy[f"{col}_smooth"]   = df_legacy[col].rolling(window, center=True, min_periods=1).mean()
+    df_pipeline[f"{col}_smooth"] = df_pipeline[col].rolling(window, center=True, min_periods=1).mean()
+
 # ── Year-over-year savings table ──────────────────────────────────────────────
 
 st.subheader("Year-over-Year Cost Summary")
@@ -347,13 +353,13 @@ st.subheader("Scenario Comparison — Legacy Path vs Pipeline Path")
 
 fig_compare = go.Figure()
 fig_compare.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["total_cost"],
+    x=df_legacy["month"], y=df_legacy["total_cost_smooth"],
     name="Legacy Path (promote all 3, then restructure)",
     mode="lines", line=dict(color="#c9a84c", width=2),
     hovertemplate="Month %{x}<br>Legacy: $%{y:,.0f}<extra></extra>"
 ))
 fig_compare.add_trace(go.Scatter(
-    x=df_pipeline["month"], y=df_pipeline["total_cost"],
+    x=df_pipeline["month"], y=df_pipeline["total_cost_smooth"],
     name="Pipeline Path (cap from day one, no exceptions)",
     mode="lines", line=dict(color="#7eb8c9", width=2),
     hovertemplate="Month %{x}<br>Pipeline: $%{y:,.0f}<extra></extra>"
@@ -385,21 +391,21 @@ st.subheader("Cost Breakdown by Level — Legacy Path")
 
 fig1 = go.Figure()
 fig1.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["senior_ii_cost"],
+    x=df_legacy["month"], y=df_legacy["senior_ii_cost_smooth"],
     name="Senior II", mode="lines",
     line=dict(color="#9b7eb8", width=2),
     fill="tozeroy", fillcolor="rgba(155,126,184,0.15)",
     hovertemplate="Month %{x}<br>Senior II: $%{y:,.0f}<extra></extra>"
 ))
 fig1.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["senior_ii_cost"] + df_legacy["senior_cost"],
+    x=df_legacy["month"], y=df_legacy["senior_ii_cost_smooth"] + df_legacy["senior_cost_smooth"],
     name="+ Seniors", mode="lines",
     line=dict(color="#c9a84c", width=2),
     fill="tonexty", fillcolor="rgba(201,168,76,0.15)",
     hovertemplate="Month %{x}<br>+ Seniors: $%{y:,.0f}<extra></extra>"
 ))
 fig1.add_trace(go.Scatter(
-    x=df_legacy["month"], y=df_legacy["total_cost"],
+    x=df_legacy["month"], y=df_legacy["total_cost_smooth"],
     name="Total", mode="lines",
     line=dict(color="#e8e4d9", width=2),
     fill="tonexty", fillcolor="rgba(126,184,201,0.15)",

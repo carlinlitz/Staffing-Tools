@@ -133,19 +133,13 @@ def run_salary_sim(
 
         active  = [s for s in staff if s["status"] == "active"]
         juniors = [s for s in active if s["role"] == "junior"]
-        legacy_remaining = [s for s in juniors if s["legacy"]]
-
-        # Check restructuring trigger (legacy mode only)
-        if legacy_mode and restructuring_month is None and total_legacy > 0 and len(legacy_remaining) == 0 and month > 0:
-            restructuring_month = month
-            events.append({"month": month, "event": f"⭐ RESTRUCTURING — all legacy juniors promoted or departed. {new_eligibility_months}-month eligibility and {int(senior_cap_pct*100)}% cap now apply."})
 
         eligible_juniors = sorted(
             [s for s in juniors if s["eligible_month"] is not None and s["eligible_month"] <= month],
             key=lambda s: s["eligible_month"]
         )
 
-        # Promotions
+        # Promotions — run BEFORE restructuring check so same-month promotions are captured
         if legacy_mode and restructuring_month is None:
             # Before restructuring: promote legacy juniors immediately, no cap
             for candidate in [s for s in eligible_juniors if s["legacy"]]:
@@ -163,6 +157,12 @@ def run_salary_sim(
                 candidate["eligible_month"] = None
                 open_promotion_slots -= 1
                 events.append({"month": month, "event": f"Junior promoted to Senior (${senior_salary:,.0f})"})
+
+        # Check restructuring AFTER promotions so same-month promotions count
+        legacy_remaining = [s for s in staff if s["status"] == "active" and s["role"] == "junior" and s["legacy"]]
+        if legacy_mode and restructuring_month is None and total_legacy > 0 and len(legacy_remaining) == 0 and month > 0:
+            restructuring_month = month
+            events.append({"month": month, "event": f"⭐ RESTRUCTURING — all legacy juniors promoted or departed. {new_eligibility_months}-month eligibility and {int(senior_cap_pct*100)}% cap now apply."})
 
         # Senior II resignations
         if month in sii_resign_months:
@@ -306,26 +306,30 @@ df_pipeline, _, _                             = run_salary_sim(**common, legacy_
 
 st.subheader("Year-over-Year Cost Summary")
 
-yearly_legacy   = df_legacy.groupby("year")["total_cost"].last()
-yearly_pipeline = df_pipeline.groupby("year")["total_cost"].last()
+yearly_legacy = df_legacy.groupby("year")["total_cost"].last()
 
 summary_rows = []
-prev_legacy   = df_legacy.iloc[0]["total_cost"]
-prev_pipeline = df_pipeline.iloc[0]["total_cost"]
+prev_cost = df_legacy.iloc[0]["total_cost"]
+
+# Year 0 — current baseline
+summary_rows.append({
+    "Year": "Now (Year 0)",
+    "Year-End Salary Bill": f"${prev_cost:,.0f}",
+    "Change from Prior Year ($)": "—",
+    "Change from Prior Year (%)": "—",
+})
 
 for y in range(1, sim_years + 1):
-    lc = yearly_legacy.get(y, prev_legacy)
-    pc = yearly_pipeline.get(y, prev_pipeline)
+    lc = yearly_legacy.get(y, prev_cost)
+    yoy_change = lc - prev_cost
+    yoy_pct    = (yoy_change / prev_cost * 100) if prev_cost > 0 else 0
     summary_rows.append({
-        "Year": y,
-        "Legacy Path Cost": f"${lc:,.0f}",
-        "Pipeline Path Cost": f"${pc:,.0f}",
-        "Legacy YoY Change": f"${lc - prev_legacy:+,.0f}" if y > 1 else "—",
-        "Pipeline YoY Change": f"${pc - prev_pipeline:+,.0f}" if y > 1 else "—",
-        "Difference (Legacy vs Pipeline)": f"${lc - pc:+,.0f}",
+        "Year": f"Year {y}",
+        "Year-End Salary Bill": f"${lc:,.0f}",
+        "Change from Prior Year ($)": f"${yoy_change:+,.0f}",
+        "Change from Prior Year (%)": f"{yoy_pct:+.1f}%",
     })
-    prev_legacy   = lc
-    prev_pipeline = pc
+    prev_cost = lc
 
 summary_df = pd.DataFrame(summary_rows)
 st.dataframe(summary_df, use_container_width=True, hide_index=True)
@@ -339,7 +343,7 @@ st.markdown("---")
 
 # ── Chart 1: Scenario comparison ─────────────────────────────────────────────
 
-st.subheader("Scenario Comparison: Legacy Path vs Pipeline Path")
+st.subheader("Scenario Comparison — Legacy Path vs Pipeline Path")
 
 fig_compare = go.Figure()
 fig_compare.add_trace(go.Scatter(
@@ -377,7 +381,7 @@ st.plotly_chart(fig_compare, use_container_width=True)
 
 # ── Chart 2: Legacy path breakdown ───────────────────────────────────────────
 
-st.subheader("Legacy Path — Cost Breakdown by Level")
+st.subheader("Cost Breakdown by Level — Legacy Path")
 
 fig1 = go.Figure()
 fig1.add_trace(go.Scatter(
@@ -424,7 +428,7 @@ st.plotly_chart(fig1, use_container_width=True)
 
 # ── Chart 3: Team composition ─────────────────────────────────────────────────
 
-st.subheader("Team Composition Over Time (Legacy Path)")
+st.subheader("Team Composition Over Time — Legacy Path")
 
 fig2 = go.Figure()
 fig2.add_trace(go.Scatter(

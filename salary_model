@@ -264,6 +264,15 @@ def run_salary_sim(
 
 st.sidebar.header("Simulation Controls")
 
+st.sidebar.subheader("📊 Scenario View")
+scenario_view = st.sidebar.radio(
+    "Table and breakdown charts show:",
+    ["Legacy Path", "Pipeline Path"],
+    index=0
+)
+st.sidebar.caption("The comparison chart always shows both paths.")
+st.sidebar.markdown("---")
+
 st.sidebar.subheader("👥 Initial Team")
 initial_senior_ii     = st.sidebar.number_input("Initial Senior IIs", 0, 20, 2)
 initial_seniors       = st.sidebar.number_input("Initial Seniors", 0, 20, 9)
@@ -347,18 +356,23 @@ for col in ["total_cost", "senior_ii_cost", "senior_cost", "junior_cost"]:
     df_legacy_chart[f"{col}_smooth"]   = df_legacy_chart[col].rolling(window, center=True, min_periods=1).mean()
     df_pipeline_chart[f"{col}_smooth"] = df_pipeline_chart[col].rolling(window, center=True, min_periods=1).mean()
 
+# Active scenario for table and breakdown charts
+active_df    = df_legacy_chart if scenario_view == "Legacy Path" else df_pipeline_chart
+active_label = scenario_view
+active_year_zero = year_zero_cost  # both scenarios share the same Year 0 baseline
+
 # ── Year-over-year savings table ──────────────────────────────────────────────
 
-st.subheader("Year-over-Year Cost Summary")
+st.subheader(f"Year-over-Year Cost Summary — {active_label}")
 
 # Use exact month 11, 23, 35... for end-of-year values (unsmoothed)
 def get_year_end_cost(df, year):
-    end_month = year * 12 - 1  # month 11 = end of year 1, etc.
+    end_month = year * 12 - 1
     row = df[df["month"] == end_month]
     return row["total_cost"].values[0] if len(row) > 0 else None
 
 summary_rows = []
-base_cost = year_zero_cost
+base_cost = active_year_zero
 prev_cost = base_cost
 
 # Year 0 — pre-promotion baseline
@@ -372,7 +386,7 @@ summary_rows.append({
 })
 
 for y in range(1, sim_years + 1):
-    lc = get_year_end_cost(df_legacy, y)
+    lc = get_year_end_cost(active_df, y)
     if lc is None:
         continue
     yoy_change = lc - prev_cost
@@ -439,25 +453,25 @@ st.plotly_chart(fig_compare, use_container_width=True)
 
 # ── Chart 2: Legacy path breakdown ───────────────────────────────────────────
 
-st.subheader("Cost Breakdown by Level — Legacy Path")
+st.subheader(f"Cost Breakdown by Level — {active_label}")
 
 fig1 = go.Figure()
 fig1.add_trace(go.Scatter(
-    x=df_legacy_chart["month"], y=df_legacy_chart["senior_ii_cost_smooth"],
+    x=active_df["month"], y=active_df["senior_ii_cost_smooth"],
     name="Senior II", mode="lines",
     line=dict(color="#9b7eb8", width=2),
     fill="tozeroy", fillcolor="rgba(155,126,184,0.15)",
     hovertemplate="Month %{x}<br>Senior II: $%{y:,.0f}<extra></extra>"
 ))
 fig1.add_trace(go.Scatter(
-    x=df_legacy_chart["month"], y=df_legacy_chart["senior_ii_cost_smooth"] + df_legacy_chart["senior_cost_smooth"],
+    x=active_df["month"], y=active_df["senior_ii_cost_smooth"] + active_df["senior_cost_smooth"],
     name="+ Seniors", mode="lines",
     line=dict(color="#c9a84c", width=2),
     fill="tonexty", fillcolor="rgba(201,168,76,0.15)",
     hovertemplate="Month %{x}<br>+ Seniors: $%{y:,.0f}<extra></extra>"
 ))
 fig1.add_trace(go.Scatter(
-    x=df_legacy_chart["month"], y=df_legacy_chart["total_cost_smooth"],
+    x=active_df["month"], y=active_df["total_cost_smooth"],
     name="Total", mode="lines",
     line=dict(color="#e8e4d9", width=2),
     fill="tonexty", fillcolor="rgba(126,184,201,0.15)",
@@ -486,29 +500,29 @@ st.plotly_chart(fig1, use_container_width=True)
 
 # ── Chart 3: Team composition ─────────────────────────────────────────────────
 
-st.subheader("Team Composition Over Time — Legacy Path")
+st.subheader(f"Team Composition Over Time — {active_label}")
 
 fig2 = go.Figure()
 fig2.add_trace(go.Scatter(
-    x=df_legacy_chart["month"], y=df_legacy_chart["n_senior_ii"],
+    x=active_df["month"], y=active_df["n_senior_ii"],
     name="Senior II", mode="lines",
     line=dict(color="#9b7eb8", width=2),
     fill="tozeroy", fillcolor="rgba(155,126,184,0.15)"
 ))
 fig2.add_trace(go.Scatter(
-    x=df_legacy_chart["month"], y=df_legacy_chart["n_senior_ii"] + df_legacy["n_seniors"],
+    x=active_df["month"], y=active_df["n_senior_ii"] + df_legacy["n_seniors"],
     name="+ Seniors", mode="lines",
     line=dict(color="#c9a84c", width=2),
     fill="tonexty", fillcolor="rgba(201,168,76,0.15)"
 ))
 fig2.add_trace(go.Scatter(
-    x=df_legacy_chart["month"], y=df_legacy_chart["total_staff"],
+    x=active_df["month"], y=active_df["total_staff"],
     name="Total Staff", mode="lines",
     line=dict(color="#e8e4d9", width=2),
     fill="tonexty", fillcolor="rgba(126,184,201,0.15)"
 ))
 fig2.add_trace(go.Scatter(
-    x=df_legacy_chart["month"], y=df_legacy_chart["n_legacy"],
+    x=active_df["month"], y=active_df["n_legacy"],
     name="Legacy Juniors Remaining", mode="lines",
     line=dict(color="#e8734a", width=2, dash="dot"),
 ))
@@ -535,8 +549,8 @@ st.plotly_chart(fig2, use_container_width=True)
 # ── Event log ─────────────────────────────────────────────────────────────────
 
 st.markdown("---")
-with st.expander("Show event log (Legacy Path)"):
-    event_df = pd.DataFrame(events_legacy)
+with st.expander(f"Show event log ({active_label})"):
+    event_df = pd.DataFrame(events_legacy if scenario_view == "Legacy Path" else [])
     event_df["Year"] = (event_df["month"] // 12) + 1
     event_df["Month of Year"] = event_df["month"] % 12 + 1
     event_df = event_df.rename(columns={"month": "Overall Month", "event": "Event"})

@@ -18,16 +18,16 @@ def run_simulation(
     initial_seniors,
     senior_cap_pct,
     sim_years,
-    senior_resignations_by_year,   # list of ints, one per year
-    junior_resignations_by_year,   # list of ints, one per year
+    senior_resignations_by_year,
+    junior_resignations_by_year,
     eligibility_weeks,
+    experienced_threshold_weeks,
     seed=1
 ):
     random.seed(seed)
     sim_weeks = sim_years * 52
     senior_cap = int(total_team_size * senior_cap_pct)
 
-    # ── Initialize staff ──────────────────────────────────────────────────────
     staff = []
     uid = 0
 
@@ -43,27 +43,24 @@ def run_simulation(
     initial_juniors = total_team_size - initial_seniors
     remaining_juniors = initial_juniors - juniors_already_eligible - juniors_eligible_in_weeks
 
-    # Juniors already eligible for promotion
     for i in range(juniors_already_eligible):
         staff.append({
             "id": uid, "role": "junior",
             "joined_week": -eligibility_weeks,
-            "eligible_week": 0,  # eligible from week 0
+            "eligible_week": 0,
             "status": "active"
         })
         uid += 1
 
-    # Juniors becoming eligible partway through simulation
     for i in range(juniors_eligible_in_weeks):
         staff.append({
             "id": uid, "role": "junior",
-            "joined_week": -eligibility_weeks + 26,  # 26 weeks from eligible
+            "joined_week": -eligibility_weeks + 26,
             "eligible_week": 26,
             "status": "active"
         })
         uid += 1
 
-    # Remaining juniors starting their clock now
     for i in range(max(0, remaining_juniors)):
         staff.append({
             "id": uid, "role": "junior",
@@ -73,15 +70,12 @@ def run_simulation(
         })
         uid += 1
 
-    # ── Generate resignation events by year ───────────────────────────────────
     def resignation_weeks_for_year(year_index, count):
-        """Generate `count` random resignation weeks within the given year."""
         year_start = year_index * 52
         year_end = year_start + 52
         if count == 0:
             return []
-        weeks = sorted(random.sample(range(year_start, year_end), min(count, 52)))
-        return weeks
+        return sorted(random.sample(range(year_start, year_end), min(count, 52)))
 
     senior_resign_weeks = []
     junior_resign_weeks = []
@@ -91,17 +85,14 @@ def run_simulation(
         senior_resign_weeks.extend(resignation_weeks_for_year(y, s_count))
         junior_resign_weeks.extend(resignation_weeks_for_year(y, j_count))
 
-    # ── Tracking ──────────────────────────────────────────────────────────────
     history = []
     events = []
     promotion_waits = []
     open_promotion_slots = 0
-    pending_junior_hires = []  # weeks when new juniors join
+    pending_junior_hires = []
 
-    # ── Week by week simulation ───────────────────────────────────────────────
     for week in range(sim_weeks):
 
-        # Process pending junior hires becoming available
         for join_week in pending_junior_hires[:]:
             if join_week <= week:
                 staff.append({
@@ -114,16 +105,13 @@ def run_simulation(
                 pending_junior_hires.remove(join_week)
                 events.append({"week": week, "event": "New junior hire joined the team"})
 
-        # Get current active staff
         active = [s for s in staff if s["status"] == "active"]
-        seniors = [s for s in active if s["role"] == "senior"]
         juniors = [s for s in active if s["role"] == "junior"]
         eligible_juniors = sorted(
             [s for s in juniors if s["eligible_week"] is not None and s["eligible_week"] <= week],
-            key=lambda s: s["eligible_week"]  # promote longest-waiting first
+            key=lambda s: s["eligible_week"]
         )
 
-        # Process promotions if slots are open
         while open_promotion_slots > 0 and eligible_juniors:
             candidate = eligible_juniors.pop(0)
             wait = week - candidate["eligible_week"]
@@ -132,21 +120,16 @@ def run_simulation(
             open_promotion_slots -= 1
             events.append({"week": week, "event": f"Junior promoted to senior (waited {wait} wks after eligibility)"})
 
-        # Senior resignations this week
         if week in senior_resign_weeks:
             active_seniors = [s for s in staff if s["status"] == "active" and s["role"] == "senior"]
             if active_seniors:
                 leaver = random.choice(active_seniors)
                 leaver["status"] = "resigned"
                 events.append({"week": week, "event": f"Senior resigned (week {week}, year {week//52+1})"})
-
-                # Always replace with junior to maintain team size
-                pending_junior_hires.append(week)  # available immediately (no onboarding delay in pipeline)
+                pending_junior_hires.append(week)
                 events.append({"week": week, "event": "Junior replacement hired"})
-
-                # Check if now below senior cap
                 current_seniors = len([s for s in staff if s["status"] == "active" and s["role"] == "senior"])
-                current_total = len([s for s in staff if s["status"] == "active"])
+                current_total   = len([s for s in staff if s["status"] == "active"])
                 cap = int(current_total * senior_cap_pct)
                 if current_seniors <= cap:
                     open_promotion_slots += 1
@@ -154,39 +137,36 @@ def run_simulation(
                 else:
                     events.append({"week": week, "event": "No promotion slot (still at/above senior cap)"})
 
-        # Junior resignations this week
         if week in junior_resign_weeks:
             active_juniors = [s for s in staff if s["status"] == "active" and s["role"] == "junior"]
             if active_juniors:
-                # Prefer to remove a non-eligible junior to preserve pipeline
                 non_eligible = [s for s in active_juniors if s["eligible_week"] is None or s["eligible_week"] > week]
                 leaver = random.choice(non_eligible if non_eligible else active_juniors)
                 leaver["status"] = "resigned"
-                events.append({"week": week, "event": f"Junior resigned (week {week}, year {week//52+1}) — eligibility progress lost"})
-                # Replacement starts eligibility clock from scratch
+                events.append({"week": week, "event": f"Junior resigned (week {week}, year {week//52+1})"})
                 pending_junior_hires.append(week)
 
-
-        # Weekly snapshot
-        active = [s for s in staff if s["status"] == "active"]
-        seniors_now = len([s for s in active if s["role"] == "senior"])
-        juniors_now = len([s for s in active if s["role"] == "junior"])
-        eligible_now = len([s for s in active if s["role"] == "junior"
-                           and s["eligible_week"] is not None
-                           and s["eligible_week"] <= week])
-        fixed_cap = int(total_team_size * senior_cap_pct)  # fixed baseline
+        # Snapshot — split juniors by tenure into Junior vs Experienced
+        active         = [s for s in staff if s["status"] == "active"]
+        seniors_now    = [s for s in active if s["role"] == "senior"]
+        juniors_all    = [s for s in active if s["role"] == "junior"]
+        experienced_now = [s for s in juniors_all if (week - s["joined_week"]) >= experienced_threshold_weeks]
+        juniors_now     = [s for s in juniors_all if (week - s["joined_week"]) <  experienced_threshold_weeks]
+        eligible_now    = len([s for s in juniors_all if s["eligible_week"] is not None and s["eligible_week"] <= week])
+        fixed_cap       = int(total_team_size * senior_cap_pct)
 
         history.append({
             "week": week,
             "year": week // 52 + 1,
             "week_of_year": week % 52 + 1,
-            "seniors": seniors_now,
-            "juniors": juniors_now,
-            "total": seniors_now + juniors_now,
+            "seniors":     len(seniors_now),
+            "experienced": len(experienced_now),
+            "juniors":     len(juniors_now),
+            "total":       len(active),
             "eligible_juniors": eligible_now,
-            "open_slots": open_promotion_slots,
-            "senior_pct": seniors_now / max(seniors_now + juniors_now, 1) * 100,
-            "senior_cap": fixed_cap,
+            "open_slots":  open_promotion_slots,
+            "senior_pct":  len(seniors_now) / max(len(active), 1) * 100,
+            "senior_cap":  fixed_cap,
         })
 
     return pd.DataFrame(history), events, promotion_waits, senior_cap
@@ -209,25 +189,36 @@ sim_years = st.sidebar.slider("Simulation Length (years)", 1, 5, 3)
 st.sidebar.subheader("📉 Senior Resignations by Year")
 senior_res = []
 for y in range(sim_years):
-    val = st.sidebar.number_input(f"Year {y+1}", 0, 10, 2 if y == 0 else (1 if y == 1 else 0),
-                                   key=f"senior_res_{y}")
+    val = st.sidebar.number_input(f"Year {y+1}", 0, 10, 2 if y == 0 else (1 if y == 1 else 0), key=f"senior_res_{y}")
     senior_res.append(int(val))
 
 st.sidebar.subheader("📉 Junior Resignations by Year")
 junior_res = []
 for y in range(sim_years):
-    val = st.sidebar.number_input(f"Year {y+1} ", 0, 10, 0,
-                                   key=f"junior_res_{y}")
+    val = st.sidebar.number_input(f"Year {y+1} ", 0, 10, 0, key=f"junior_res_{y}")
     junior_res.append(int(val))
 
 st.sidebar.subheader("🎯 Current Junior Pipeline")
-juniors_already_eligible = st.sidebar.number_input("Juniors already eligible for promotion", 0, 10, 2)
+juniors_already_eligible        = st.sidebar.number_input("Juniors already eligible for promotion", 0, 10, 2)
 juniors_eligible_in_weeks_input = st.sidebar.number_input("Juniors becoming eligible in ~6 months", 0, 10, 1)
-st.sidebar.caption(f"Remaining juniors start their eligibility clock from week 0")
+st.sidebar.caption("Remaining juniors start their eligibility clock from week 0")
 
 st.sidebar.subheader("⚙️ Promotion Settings")
-eligibility_weeks = st.sidebar.slider("Promotion Eligibility (weeks in org)", 26, 130, 78,
-                                       help="78 weeks = 18 months")
+eligibility_weeks = st.sidebar.slider("Promotion Eligibility (weeks in org)", 26, 130, 78, help="78 weeks = 18 months")
+
+st.sidebar.subheader("📊 Staff Proportion Chart")
+experienced_threshold = st.sidebar.slider(
+    "Experienced threshold (weeks in org)", 26, 130, 52,
+    help="Juniors past this tenure count as 'Experienced' in the proportion donuts"
+)
+st.sidebar.markdown("**Ideal Proportions** *(must sum to 100%)*")
+ideal_junior      = st.sidebar.slider("Ideal % Junior",      0, 100, 10)
+ideal_experienced = st.sidebar.slider("Ideal % Experienced", 0, 100, 20)
+ideal_senior      = st.sidebar.slider("Ideal % Senior",      0, 100, 50)
+ideal_senior_ii   = st.sidebar.slider("Ideal % Senior II",   0, 100, 20)
+ideal_total = ideal_junior + ideal_experienced + ideal_senior + ideal_senior_ii
+if ideal_total != 100:
+    st.sidebar.warning(f"Ideal proportions sum to {ideal_total}% — adjust to reach 100%")
 
 st.sidebar.subheader("🎲 Randomization")
 seed = st.sidebar.slider("Seed", 1, 100, 1)
@@ -244,6 +235,7 @@ df, events, promotion_waits, senior_cap = run_simulation(
     juniors_already_eligible=int(juniors_already_eligible),
     juniors_eligible_in_weeks=int(juniors_eligible_in_weeks_input),
     eligibility_weeks=eligibility_weeks,
+    experienced_threshold_weeks=experienced_threshold,
     seed=seed
 )
 
@@ -262,7 +254,6 @@ col3.metric("Junior Resignations", total_junior_res)
 col4.metric("Total Promotions", len(promotion_waits))
 col5.metric("Avg Wait After Eligibility", f"{avg_wait} weeks" if promotion_waits else "No promotions")
 
-# Alerts
 final = df.iloc[-1]
 if final["open_slots"] > 0 and final["eligible_juniors"] == 0:
     st.error("🚨 Critical pipeline gap: open promotion slots exist but NO eligible juniors available!")
@@ -306,11 +297,9 @@ fig1.add_trace(go.Scatter(
     name="Senior Cap", mode="lines",
     line=dict(color="#c9a84c", width=1, dash="dot"),
 ))
-
 for y in range(1, sim_years + 1):
     fig1.add_vline(x=y * 52, line_width=1, line_color="#2a2a3a",
                    annotation_text=f"Year {y}", annotation_position="top")
-
 fig1.update_layout(
     paper_bgcolor="#0f0f14", plot_bgcolor="#0f0f14",
     font=dict(color="#e8e4d9", family="Georgia"),
@@ -336,10 +325,8 @@ fig2.add_trace(go.Scatter(
 fig2.add_hline(y=senior_cap_pct * 100, line_dash="dot", line_color="#e8734a",
                annotation_text=f"Cap ({int(senior_cap_pct*100)}%)",
                annotation_position="top right")
-
 for y in range(1, sim_years + 1):
     fig2.add_vline(x=y * 52, line_width=1, line_color="#2a2a3a")
-
 fig2.update_layout(
     paper_bgcolor="#0f0f14", plot_bgcolor="#0f0f14",
     font=dict(color="#e8e4d9", family="Georgia"),
@@ -350,16 +337,109 @@ fig2.update_layout(
 )
 st.plotly_chart(fig2, use_container_width=True)
 
-# ── Promotion summary callout ────────────────────────────────────────────────
+# ── Chart 3: Staff proportion donuts ─────────────────────────────────────────
 
+st.markdown("---")
+proj_year_label = min(3, sim_years)
+st.subheader(f"Staff Proportion — Ideal vs Current vs Projected (Year {proj_year_label})")
+st.caption(
+    f"Junior = fewer than {experienced_threshold} weeks in org  ·  "
+    f"Experienced = {experienced_threshold}+ weeks in org  ·  "
+    f"Senior II not tracked in this simulator (set Ideal % to reflect your target)"
+)
+
+LEVEL_COLORS = {
+    "Junior":      "#7eb8c9",
+    "Experienced": "#4a90d9",
+    "Senior":      "#c9a84c",
+    "Senior II":   "#9b7eb8",
+}
+labels = ["Junior", "Experienced", "Senior", "Senior II"]
+colors = [LEVEL_COLORS[l] for l in labels]
+
+# Ideal
+ideal_values = [ideal_junior, ideal_experienced, ideal_senior, ideal_senior_ii]
+
+# Current — week 0
+row0 = df.iloc[0]
+t0 = max(row0["total"], 1)
+current_values = [
+    round(row0["juniors"]     / t0 * 100, 1),
+    round(row0["experienced"] / t0 * 100, 1),
+    round(row0["seniors"]     / t0 * 100, 1),
+    0,
+]
+
+# Projected — end of Year 3 (or last week)
+proj_week = min(proj_year_label * 52 - 1, len(df) - 1)
+rowP = df.iloc[proj_week]
+tP = max(rowP["total"], 1)
+proj_values = [
+    round(rowP["juniors"]     / tP * 100, 1),
+    round(rowP["experienced"] / tP * 100, 1),
+    round(rowP["seniors"]     / tP * 100, 1),
+    0,
+]
+
+def make_donut(title, values, center_text):
+    fig = go.Figure(go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.55,
+        marker=dict(colors=colors, line=dict(color="#0f0f14", width=2)),
+        textinfo="percent",
+        textfont=dict(size=13, color="#e8e4d9"),
+        hovertemplate="%{label}: %{value:.1f}%<extra></extra>",
+        sort=False,
+        direction="clockwise",
+    ))
+    fig.update_layout(
+        paper_bgcolor="#0f0f14",
+        font=dict(color="#e8e4d9", family="Georgia"),
+        showlegend=False,
+        margin=dict(l=10, r=10, t=55, b=10),
+        height=280,
+        title=dict(text=f"<b>{title}</b>", x=0.5, font=dict(size=15, color="#e8e4d9")),
+        annotations=[dict(
+            text=center_text, x=0.5, y=0.5,
+            font=dict(size=11, color="#a0a0b0"),
+            showarrow=False
+        )]
+    )
+    return fig
+
+dcol1, dcol2, dcol3 = st.columns(3)
+with dcol1:
+    st.plotly_chart(make_donut("Ideal", ideal_values, "Target"), use_container_width=True)
+with dcol2:
+    st.plotly_chart(make_donut("Current", current_values, f"{int(t0)} staff"), use_container_width=True)
+with dcol3:
+    st.plotly_chart(make_donut(f"Projected (Year {proj_year_label})", proj_values, f"{int(tP)} staff"), use_container_width=True)
+
+# Shared legend row
+leg_cols = st.columns(4)
+for i, (label, color) in enumerate(LEVEL_COLORS.items()):
+    leg_cols[i].markdown(
+        f"<div style='display:flex;align-items:center;gap:8px;padding:4px 0'>"
+        f"<div style='width:14px;height:14px;border-radius:3px;background:{color};flex-shrink:0'></div>"
+        f"<span style='color:#e8e4d9;font-size:14px'>{label}</span></div>",
+        unsafe_allow_html=True
+    )
+
+if ideal_total != 100:
+    st.caption(f"⚠️ Ideal proportions sum to {ideal_total}% — adjust the sidebar sliders to 100% for an accurate comparison.")
+
+# ── Promotion summary ─────────────────────────────────────────────────────────
+
+st.markdown("---")
 st.subheader("Promotion Pipeline Summary")
 
 if promotion_waits:
     total_promos = len(promotion_waits)
-    avg_wait = int(sum(p["wait_weeks"] for p in promotion_waits) / total_promos)
-    max_wait = max(p["wait_weeks"] for p in promotion_waits)
-    min_wait = min(p["wait_weeks"] for p in promotion_waits)
-    
+    avg_wait     = int(sum(p["wait_weeks"] for p in promotion_waits) / total_promos)
+    max_wait     = max(p["wait_weeks"] for p in promotion_waits)
+    min_wait     = min(p["wait_weeks"] for p in promotion_waits)
+
     pcol1, pcol2, pcol3 = st.columns(3)
     pcol1.metric("Total Promotions", total_promos)
     pcol2.metric("Avg Wait After Eligibility", f"{avg_wait} weeks")
@@ -368,13 +448,13 @@ if promotion_waits:
     if avg_wait == 0:
         wait_msg = "Promoted staff were promoted immediately upon eligibility — slots opened fast enough to keep up with the pipeline."
     elif avg_wait < 13:
-        wait_msg = f"Of {total_promos} promotion(s) during this simulation, staff waited an average of {avg_wait} weeks after becoming eligible before a slot opened. Waits ranged from {min_wait} to {max_wait} weeks."
+        wait_msg = f"Of {total_promos} promotion(s), staff waited an average of {avg_wait} weeks after becoming eligible. Waits ranged from {min_wait} to {max_wait} weeks."
     else:
-        wait_msg = f"Of {total_promos} promotion(s) during this simulation, staff waited an average of {avg_wait} weeks after becoming eligible — over 3 months. This suggests attrition is too slow to keep pace with junior eligibility. Waits ranged from {min_wait} to {max_wait} weeks."
-    
+        wait_msg = f"Of {total_promos} promotion(s), staff waited an average of {avg_wait} weeks after becoming eligible — over 3 months. This suggests attrition is too slow to keep pace with junior eligibility. Waits ranged from {min_wait} to {max_wait} weeks."
+
     st.info(wait_msg)
 else:
-    st.warning("No promotions occurred during this simulation. This may mean attrition is too slow to open slots, or no juniors reached eligibility in time.")
+    st.warning("No promotions occurred during this simulation.")
 
 # ── Event log ─────────────────────────────────────────────────────────────────
 
@@ -383,7 +463,7 @@ st.subheader("Event Log")
 
 with st.expander("Show full event log"):
     event_df = pd.DataFrame(events)
-    event_df["Year"] = (event_df["week"] // 52) + 1
+    event_df["Year"]         = (event_df["week"] // 52) + 1
     event_df["Week of Year"] = event_df["week"] % 52 + 1
     event_df = event_df.rename(columns={"week": "Overall Week", "event": "Event"})
     event_df = event_df[["Year", "Week of Year", "Overall Week", "Event"]]

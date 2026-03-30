@@ -33,33 +33,43 @@ def create_staff(n_senior, n_junior, unavailable_weeks=3, seed=None):
     return staff
 
 
-def build_assignments(rotation_tracks):
+def build_assignments(rotation_tracks, sudden_onset_count=0, seed=1):
     """
-    Build a flat list of assignments from user-defined rotation tracks.
-    Each track: { name, duration, num_slots, difficulty, spacing }
-    Slots are spread across the year with even spacing.
+    Regular rotation tracks: back-to-back with 1-week handover overlap.
+    Sudden-onset assignments: randomized timing and duration (2-6 weeks).
     """
+    rng = random.Random(seed)
     all_assignments = []
+
     for track in rotation_tracks:
         name     = track["name"]
         duration = track["duration"]
-        slots    = track["num_slots"]
         diff     = track["difficulty"]
-        # Spread slots evenly across 52 weeks
-        if slots == 0:
-            continue
-        spacing = max(duration + 1, 52 // slots)
-        start = 1
-        for i in range(slots):
-            actual_start = min(start, 52 - duration + 1)
+        step     = max(1, duration - 1)  # 1-week overlap
+        start    = 1
+        slot     = 1
+        while start + duration - 1 <= 52:
             all_assignments.append({
-                "name":       f"{name} {i+1}",
-                "start":      actual_start,
+                "name":       f"{name} {slot}",
+                "start":      start,
                 "duration":   duration,
                 "difficulty": diff,
                 "track":      name,
             })
-            start += spacing
+            start += step
+            slot  += 1
+
+    for i in range(sudden_onset_count):
+        duration = rng.randint(2, 6)
+        start    = rng.randint(1, 52 - duration + 1)
+        all_assignments.append({
+            "name":       f"Sudden-Onset {i+1}",
+            "start":      start,
+            "duration":   duration,
+            "difficulty": "high",
+            "track":      "Sudden-Onset",
+        })
+
     return all_assignments
 
 
